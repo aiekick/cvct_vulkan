@@ -1,0 +1,56 @@
+//https://github.com/Microsoft/DirectX-Graphics-Samples/blob/master/MiniEngine/Core/Shaders/GenerateMipsCS.hlsli
+#version 450
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_ARB_shading_language_420pack : enable
+
+#define COLOR_IMAGE_VOXEL 0
+#define ALPHA_IMAGE_VOXEL 1
+#define COLOR_IMAGE_COUNT 6
+
+#define COLOR_IMAGE_POSX_3D_BINDING 0
+#define COLOR_IMAGE_NEGX_3D_BINDING 1
+#define COLOR_IMAGE_POSY_3D_BINDING 2
+#define COLOR_IMAGE_NEGY_3D_BINDING 3
+#define COLOR_IMAGE_POSZ_3D_BINDING 4
+#define COLOR_IMAGE_NEGZ_3D_BINDING 5
+
+// Voxel textures
+layout(set = 0, binding = COLOR_IMAGE_VOXEL, rgba8) uniform image3D voxelColor;
+// Alpha textures
+layout(set = 0, binding = ALPHA_IMAGE_VOXEL, r32ui) uniform uimage3D voxelAlpha;
+// Uniform buffer
+layout(push_constant) uniform PushConsts
+{
+	layout(offset = 0)vec3 gridres;
+	layout(offset = 12)uint cascadeNum;		// The current cascade
+} pc;
+
+uint ConvVec4ToRGBA8(vec4 val)
+{
+	uvec4 cb = uvec4(val);
+	return (cb.w << 24U) | (cb.z << 16U) | (cb.y << 8U) | cb.x;
+}
+
+void ReplaceAlpha(ivec3 coord)
+{
+	vec4 diffuse = imageLoad(voxelColor, coord).rgba;
+	uint alpha = imageAtomicMin(voxelAlpha,coord,0);
+	float ac = diffuse.a;		
+	// Store
+	imageStore(voxelColor, coord, vec4(diffuse.rgb,alpha));
+}
+
+// Set the local sizes
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+void main()
+{
+	// cascade offset
+	uint cascadeoffset = uint(pc.gridres.y) * pc.cascadeNum;
+	// Texture coordinate de-normalized
+	uvec3 coord = gl_GlobalInvocationID;
+	coord.y += cascadeoffset;
+
+	ReplaceAlpha(ivec3(coord));
+}

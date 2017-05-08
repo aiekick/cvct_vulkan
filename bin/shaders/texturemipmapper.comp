@@ -1,0 +1,118 @@
+//https://github.com/Microsoft/DirectX-Graphics-Samples/blob/master/MiniEngine/Core/Shaders/GenerateMipsCS.hlsli
+#version 450
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_ARB_shading_language_420pack : enable
+
+#define MAXMIP 4
+
+layout(set = 0, binding = 0) uniform sampler2D rTexture;							// Read mip0
+layout(set = 0, binding = 1, rgba8) writeonly uniform image2D wTexture[MAXMIP];		// Write
+//uniform buffers
+layout (set = 0, binding = 2) uniform UBO 
+{
+	uint srcMipLevel;
+	uint numMipLevels;
+	vec2 padding1;
+	vec2 texelSize;
+	vec2 padding2;
+} ubo;
+
+shared float gs_R[64];
+shared float gs_G[64];
+shared float gs_B[64];
+shared float gs_A[64];
+
+void StoreColor(uint index, vec4 color)
+{
+	gs_R[index] = color.r;
+	gs_G[index] = color.g;
+	gs_B[index] = color.b;
+	gs_A[index] = color.a;
+}
+
+vec4 LoadColor( uint index )
+{
+	return vec4( gs_R[index], gs_G[index], gs_B[index], gs_A[index]);
+}
+
+// Set the local sizes
+layout (local_size_x = 8, local_size_y = 8) in;
+
+void main()
+{
+	// Group Index within one workgroup
+	uint gi = gl_LocalInvocationIndex;
+    // Current workgroupID
+	uvec3 wgid = gl_WorkGroupID;
+    // workgroupID * workgroupSize + localID
+	uvec3 dtid = gl_GlobalInvocationID;
+
+	vec2 uv = ubo.texelSize * (vec2(dtid.xy) + vec2(0.5f)); // Normalize
+
+	// Sample from mip0
+	//vec4 src1 = textureLod(rTexture, uv, float(ubo.srcMipLevel));
+	vec4 src1 = texture(rTexture, uv);
+	//vec4 src1 = vec4(1,0,0,1);
+	// Write to mip1
+	imageStore(wTexture[0], ivec2(dtid.xy), src1);
+	
+	// Early out 
+	if (ubo.numMipLevels == 1) 
+		return;
+
+	StoreColor(gi,src1);
+
+	// Sync with all the threads in the workgroup
+	groupMemoryBarrier();
+	barrier();
+
+    uint row = gl_WorkGroupSize.x;
+	uint v00 = 0, v10 = row, v01 = 1, v11 = row+1;
+
+	// Check if X Y, Z are even
+	if ((gi & 0x9) == 0)
+	{
+		//fronts
+		vec4 src2 = LoadColor(gi + v01);
+		vec4 src3 = LoadColor(gi + v10);
+		vec4 src4 = LoadColor(gi + v11);
+		src1 = 0.25f * (src1 + src2 + src3 + src4);
+
+		imageStore(wTexture[1], ivec2(dtid.xy) / 2, src1);
+		StoreColor(gi, src1);
+	}
+
+	if (ubo.numMipLevels == 2)
+		return;
+
+	// Sync with all the threads in the workgroup
+	groupMemoryBarrier();
+	barrier();
+
+	// This bit mask (binary: 011011) checks that X and Y are multiples of four.
+	if ((gi & 0x1B) == 0)
+	{
+		vec4 src2 = LoadColor(gi + 0x02);
+		vec4 src3 = LoadColor(gi + 0x10);
+		vec4 src4 = LoadColor(gi + 0x12);
+		src1 = 0.25 * (src1 + src2 + src3 + src4);
+
+		imageStore(wTexture[2], ivec2(dtid.xy) / 4, src1);
+		StoreColor(gi, src1);
+	}
+
+	if (ubo.numMipLevels == 3)
+		return;
+
+	if (gi == 0)
+	{
+		vec4 src2 = LoadColor(gi + 0x04);
+		vec4 src3 = LoadColor(gi + 0x20);
+		vec4 src4 = LoadColor(gi + 0x24);
+		src1 = 0.25 * (src1 + src2 + src3 + src4);
+
+		imageStore(wTexture[3], ivec2(dtid.xy) / 8, src1);
+	}
+	
+}
