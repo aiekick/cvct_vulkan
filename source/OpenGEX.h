@@ -44,47 +44,10 @@
 #ifndef OpenGEX_h
 #define OpenGEX_h
 
-#define DEFAULT_SEED 0xA86F13C7 
-
 #include <OpenDDL.h>
 #include <glm/glm.hpp>
-#include <windows.h>
-
-#include "MurmurHash.h"
 
 using namespace ODDL;
-
-//extern void LoadAssetStaticManager(char* path, uint32_t pathLenght);
-
-enum upVector
-{
-	UP_VECTOR_X,
-	UP_VECTOR_Y,
-	UP_VECTOR_Z
-};
-
-enum
-{
-	MESH_PRIMITIVE_TYPE_TRIANGLE_LIST = 1
-};
-
-enum
-{
-	FLAG_HAS_POSITION = (1 << 0),
-	FLAG_HAS_TEXCOORD = (1 << 1),
-	FLAG_HAS_TANGENT = (1 << 2),
-	FLAG_HAS_NORMAL = (1 << 3),
-};
-
-enum
-{
-	VERTEX_BUFFER_ELEMENT_TYPE_HALF,
-	VERTEX_BUFFER_ELEMENT_TYPE_FLOAT,
-	VERTEX_BUFFER_ELEMENT_TYPE_DOUBLE
-};
-
-
-
 
 namespace OGEX
 {
@@ -968,23 +931,6 @@ namespace OGEX
 			LightObjectStructure();
 			~LightObjectStructure();
 
-			// edit
-			glm::vec4 color;
-			float intensity;
-
-			float constant;
-			float smooth;
-			float linear;
-			float scale;
-			float quadratic;
-			float offset;
-
-			float angleinner;
-			float angleouter;
-
-			float cosangleinner;
-			float cosangleouter;
-
 			const String& GetTypeString(void) const
 			{
 				return (typeString);
@@ -1542,130 +1488,6 @@ namespace OGEX
 			bool ValidateTopLevelStructure(const Structure *structure) const;
 	};
 }
-
-struct OgexScanInfo
-{
-	struct OgexStringTableEntry
-	{
-		uint64_t hash;
-		union
-		{
-			const char* strPtr;
-			uint64_t offset;
-		};
-	};
-	struct ogesTextureTableEntry
-	{
-		uint64_t pathOffset;
-		uint32_t textureIndex;
-	};
-
-	uint32_t modelCount, meshCount, materialCount;
-	uint32_t modelReferenceCount;
-	uint32_t materialReferenceCount, textureReferenceCount;
-	uint32_t pointLightCount, spotLightCount, directionalLightCount;
-
-	uint32_t vertexArrayCount, indexArrayCount;
-	uint64_t totalVertexByteCount, totalIndexByteCount;
-	uint32_t flags;
-
-	OgexStringTableEntry* stringTable;
-
-	uint32_t stringTableSlots;
-
-	ogesTextureTableEntry* textureTable;
-	uint32_t textureTableSlots;
-	uint32_t textureCount;
-
-	//////////////////////////
-
-	void AddString(const char* string)
-	{
-		uint64_t out[2];
-		MurmurHash3_x64_128(string, (int)strlen(string), DEFAULT_SEED, out);
-
-		uint64_t slot = out[1] % stringTableSlots;
-		for (uint32_t i = 0; i < 32; i++)
-		{
-			if (stringTable[slot].strPtr == NULL)
-			{
-				stringTable[slot].strPtr = string;
-				stringTable[slot].hash = out[0];
-				return;
-			}
-			else if (stringTable[slot].hash == out[0])
-			{
-				assert(strcmp(string, stringTable[slot].strPtr) == 0);	// Make sure this is not a hash collision
-				return;	// Already in the table; Dupe!
-			}
-			out[1] = Hash64Shift(out[1]);
-			slot = out[1] % stringTableSlots;
-		}
-		assert(false); // Could not find an empty slot!
-	}
-
-	uint64_t FindStringOffset(const char* string)
-	{
-		uint64_t out[2];
-		MurmurHash3_x64_128(string, (int)strlen(string), DEFAULT_SEED, out);
-
-		uint64_t slot = out[1] % stringTableSlots;
-		for (uint32_t i = 0; i < 32; i++)
-		{
-			assert(stringTable[slot].offset != 0xFFFFFFFFFFFFFFFFULL);
-			if (stringTable[slot].hash == out[0])
-			{
-				return stringTable[slot].offset;
-			}
-			out[1] = Hash64Shift(out[1]);
-			slot = out[1] % stringTableSlots;
-		}
-		assert(false); // Could not find an empty slot!
-		return 0xFFFFFFFFFFFFFFFF;
-	}
-
-	//////////////////////////
-
-	uint32_t AddTexture(uint64_t pathOffset)
-	{
-		uint64_t hash = pathOffset;
-		uint64_t slot = hash % textureTableSlots;
-		for (uint32_t i = 0; i < 32; i++)
-		{
-			if (textureTable[slot].pathOffset == 0xFFFFFFFFFFFFFFFF)
-			{
-				textureTable[slot].pathOffset = pathOffset;
-				textureTable[slot].textureIndex = textureCount++;
-				return textureTable[slot].textureIndex;
-			}
-			else if (textureTable[slot].pathOffset == pathOffset)
-			{
-				return textureTable[slot].textureIndex;	// Already in the table; Dupe!
-			}
-			hash = Hash64Shift(hash);
-			slot = hash % textureTableSlots;
-		}
-		assert(false); // Could not find an empty slot!
-		return 0xFFFFFFFF;
-	}
-
-	uint32_t FindTexture(uint64_t pathOffset)
-	{
-		uint64_t hash = pathOffset;
-		uint64_t slot = hash % textureTableSlots;
-		for (uint32_t i = 0; i < 32; i++)
-		{
-			if (textureTable[slot].pathOffset == pathOffset)
-			{
-				return textureTable[slot].textureIndex;
-			}
-			hash = Hash64Shift(hash);
-			slot = hash % textureTableSlots;
-		}
-		assert(false); // Could not find an empty slot!
-		return 0xFFFFFFFF;
-	}
-};
 
 
 #endif

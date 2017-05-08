@@ -5,18 +5,16 @@
 #include "Defines.h"
 #include "DataTypes.h"
 #include "OpenGEX.h"
-#include "MemoryAllocator.h"
+
 
 #define CONVERTERNUM 5
 #define CONVERSIONDEPTH 4
 
-class AssetManager;
-
-typedef uint32_t(*sig_ConvertAsset) (Asset* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx, AssetManager& assetmanager);
-extern uint32_t ConvertAsset_Image(Asset* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx, AssetManager& assetmanager);
-extern uint32_t ConvertAsset_OpenGEX(Asset* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx, AssetManager& assetmanager);
-extern uint32_t ConvertAsset_HLSL_Bytecode(Asset* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx, AssetManager& assetmanager);
-extern uint32_t ConvertAsset_SPIRV(Asset* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx, AssetManager& assetmanager);
+typedef uint32_t(*sig_ConvertAsset) (asset_s* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx);
+uint32_t ConvertAsset_Image(asset_s* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx);
+uint32_t ConvertAsset_OpenGEX(asset_s* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx);
+uint32_t ConvertAsset_HLSL_Bytecode(asset_s* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx);
+uint32_t ConvertAsset_SPIRV(asset_s* outAsset, const void* data, uint64_t dataSizeInBytes, const char* basePath, uint32_t basePathLength, Memory_Linear_Allocator* allocator, uint32_t allocatorIdx);
 
 struct ConverterMap
 {
@@ -40,7 +38,7 @@ public:
 	int32_t InitAssetManager();// initializes the assetmanager
 	int32_t LoadAsset(const char* path, uint32_t pathLength); 	//loads all assets, will branch depending on the type of file
 	int32_t FlushAssets();
-	int32_t GetAsset(const char* path, Asset** outAsset);
+	int32_t GetAsset(const char* path, asset_s** outAsset);
 	///////////////////////////////////////////////////////
 	//convertermap
 	ConverterMap		m_converterMap[CONVERTERNUM];

@@ -1,7 +1,7 @@
 #include "AssetManager.h"
-#include <stdio.h>
 #include "io.h"
-#include "MemoryAllocator.h"
+
+#include <stdio.h>
 
 AssetManager::AssetManager()
 {
@@ -203,7 +203,7 @@ int32_t AssetManager::LoadAsset(const char* path, uint32_t pathLength)
 	QueryPerformanceCounter(&start);
 
 	AssetDescriptor descriptor;
-	ret = (*converterFunc)(&descriptor.asset, dataFile, fileSize, buffer, basePathLength, m_assetAllocator, ALLOCATOR_IDX_ASSET_DATA, *this);
+	ret = (*converterFunc)(&descriptor.asset, dataFile, fileSize, buffer, basePathLength, m_assetAllocator, ALLOCATOR_IDX_ASSET_DATA);
 
 	QueryPerformanceCounter(&end);				//end timing
 
@@ -282,9 +282,9 @@ int32_t AssetManager::FlushAssets()
 	return 0;
 }
 
-int32_t AssetManager::GetAsset(const char* path, Asset** outAsset)
+int32_t AssetManager::GetAsset(const char* path, asset_s** outAsset)
 {
-	Asset* out = NULL;
+	asset_s* out = NULL;
 	int32_t ret = 0;
 
 	for (uint32_t i = 0; i < m_descriptorCount; i++)
