@@ -16,7 +16,7 @@
 	1. Redistributions of source code must retain the entire text of this license,
 	comprising the above copyright notice, this list of conditions, and the following
 	disclaimer.
-	
+
 	2. Redistributions of any modified source code files must contain a prominent
 	notice immediately following this license stating that the contents have been
 	modified from their original form.
@@ -52,7 +52,7 @@
 
 using namespace OGEX;
 
-#define DEFAULT_SEED 0xA86F13C7 
+#define DEFAULT_SEED 0xA86F13C7
 
 extern void LoadAssetStaticManager(char* path, uint32_t pathLenght);
 
@@ -97,7 +97,7 @@ struct OgexScanInfo
 	struct OgexStringTableEntry
 	{
 		uint64_t hash;
-		union 
+		union
 		{
 			const char* strPtr;
 			uint64_t offset;
@@ -1360,8 +1360,8 @@ DataResult VertexArrayStructure::ProcessData(DataDescription *dataDescription)
 	switch (dataStructure->GetStructureType())
 	{
 	case ODDL::kDataHalf:
-		totalByteSize = 
-			sizeof(ODDL::HalfDataType::PrimType) 
+		totalByteSize =
+			sizeof(ODDL::HalfDataType::PrimType)
 			* static_cast<const ODDL::DataStructure<ODDL::HalfDataType>*>(dataStructure)->GetDataElementCount();
 		vertexCount =
 			static_cast<const ODDL::DataStructure<ODDL::HalfDataType>*> (dataStructure)->GetDataElementCount()
@@ -2168,7 +2168,7 @@ DataResult MeshStructure::ProcessData(DataDescription *dataDescription)
 				flags |= FLAG_HAS_NORMAL;
 
 			vertexArrayCount++;
-			
+
 		}
 		else if (type == kStructureIndexArray)
 		{
@@ -3936,53 +3936,12 @@ void OgexReadNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::Struct
 		String lightType = lightObject->GetTypeString();
 		if (lightType == "point")
 		{
-			/*
-			assert(sceneInfo->pointLightCount);
-			sceneInfo->pointLightCount--;
-			point_light_t* light = sceneInfo->pointLights++;
-			light->transform = sceneTransform;
-			light->color[0] = lightObject->color[0], light->color[1] = lightObject->color[1], light->color[2] = lightObject->color[2];
-			light->constantAttenuation = lightObject->constantAttenuation, light->linearAttenuation = lightObject->linearAttenuation, light->quadraticAttenuation = lightObject->quadraticAttenuation;
-			light->attenuationScale = lightObject->attenuationScale, light->attenuationOffset = lightObject->attenuationOffset;
-
-			light->flags = 0;
-			if (lightObject->GetShadowFlag())
-				light->flags |= SCENE_LIGHT_FLAG_SHADOWS;
-
-				*/
 		}
 		else if (lightType == "spot")
 		{
-		/*	assert(sceneInfo->spotLightCount);
-			sceneInfo->spotLightCount--;
-			spot_light_t* light = sceneInfo->spotLights++;
-			light->transform = sceneTransform;
-			light->color[0] = lightObject->color[0], light->color[1] = lightObject->color[1], light->color[2] = lightObject->color[2];
-			light->constantAttenuation = lightObject->constantAttenuation, light->linearAttenuation = lightObject->linearAttenuation, light->quadraticAttenuation = lightObject->quadraticAttenuation;
-			light->attenuationScale = lightObject->attenuationScale, light->attenuationOffset = lightObject->attenuationOffset;
-			light->outerAngle = lightObject->outerAngle, light->innerAngle = lightObject->innerAngle;
-
-			light->flags = 0;
-			if (lightObject->GetShadowFlag())
-				light->flags |= SCENE_LIGHT_FLAG_SHADOWS;
-				*/
 		}
 		else if (lightType == "infinite")
 		{
-		/*	assert(sceneInfo->directionalLightCount);
-			sceneInfo->directionalLightCount--;
-			rvm_aos_vec3 forward = { 0.0f, 0.0f, -1.0f };
-			rvm_aos_vec3 direction;
-			rvm_aos_mat4_mul_aos_vec3w0(&direction, &sceneTransform, &forward);
-
-			directional_light_t* light = sceneInfo->directionalLights++;
-			rvm_aos_vec3_normalize((rvm_aos_vec3*)light->direction, &direction);
-			light->color[0] = lightObject->color[0], light->color[1] = lightObject->color[1], light->color[2] = lightObject->color[2];
-
-			light->flags = 0;
-			if (lightObject->GetShadowFlag())
-				light->flags |= SCENE_LIGHT_FLAG_SHADOWS;
-				*/
 		}
 	}
 	break;
@@ -4026,7 +3985,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::St
 	switch (desc->GetUpDirection())
 	{
 	case 0:	// x = up
-		transform = 
+		transform =
 		{
 			0.0f, 1.0f, 0.0f, 0.0f,
 			1.0f, 0.0f, 0.0f, 0.0f,
@@ -4037,7 +3996,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::St
 	case 1:	// y = up -> no transform
 		break;
 	case 2: // z = up
-		transform = 
+		transform =
 		{
 			1.0f, 0.0f, 0.0f, 0.0f,
 			0.0f, 0.0f, 1.0f, 0.0f,
@@ -4105,7 +4064,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::St
 
 						const OGEX::VertexArrayStructure* posVa = NULL;
 						const OGEX::VertexArrayStructure* texVa = NULL;
-						const OGEX::VertexArrayStructure* normVa = NULL; 
+						const OGEX::VertexArrayStructure* normVa = NULL;
 
 						glm::vec3* vertex = NULL;
 						glm::vec2* texcoord = NULL;
@@ -4126,7 +4085,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::St
 									posVa = va;
 									vertex = (glm::vec3*)(sceneInfo->vertexData + sceneInfo->vertexDataSizeInBytes);
 								}
-								
+
 								else if (va->GetArrayAttrib() == "texcoord")
 								{
 									texVa = va;
@@ -4410,7 +4369,7 @@ uint32_t ConvertAsset_OpenGEX
 
 	if (res != ODDL::kDataOkay)
 		return (uint32_t)res;
-	
+
 	uint64_t totalStringLength = 0;
 	for (uint32_t i = 0; i < scanInfo.stringTableSlots; i++)
 	{
