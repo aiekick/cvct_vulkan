@@ -1,12 +1,12 @@
 #include "AssetManager.h"
-#include "io.h"
-
 #include <stdio.h>
+#include "io.h"
+#include "MemoryAllocator.h"
 
 AssetManager::AssetManager()
 {
 	//assign the convertermap funcitons
-	ConverterMap cm[] =
+	ConverterMap cm[] = 
 	{
 		{ ".png",  ConvertAsset_Image },
 		{ ".tga",  ConvertAsset_Image },
@@ -28,7 +28,6 @@ AssetManager::~AssetManager()
 
 int32_t AssetManager::InitAssetManager()
 {
-	//TODO::Scale the allocated memory accordingly
 	//create all the allocators
 	m_assetAllocator = CreateVirtualMemoryAllocator(ALLOCATOR_IDX_ASSET_DATA, 0xFFFFFFFF);
 	m_assetDescriptorAllocator = CreateVirtualMemoryAllocator(ALLOCATOR_IDX_ASSET_DESC, 0xFFFFFFFF);
@@ -83,7 +82,7 @@ int32_t AssetManager::InitAssetManager()
 		printf("No cache available, magic number not consistant \n");
 	}
 #endif
-
+	
 	return 0;
 }
 
@@ -96,7 +95,7 @@ int32_t AssetManager::LoadAsset(const char* path, uint32_t pathLength)
 		return -1;	//already loaded from cache or file
 	}
 
-	//save it
+	//save it 
 	char* buffer = (char*)_alloca(pathLength + 1);
 	strncpy(buffer, path, pathLength);
 	buffer[pathLength] = '\0';
@@ -178,7 +177,7 @@ int32_t AssetManager::LoadAsset(const char* path, uint32_t pathLength)
 		if (strcmp(ext, m_converterMap[i].type) != 0)		//no hit
 			continue;
 		else												//hit
-		{
+		{	
 			converterFunc = &m_converterMap[i].func;
 			break;
 		}
@@ -204,7 +203,7 @@ int32_t AssetManager::LoadAsset(const char* path, uint32_t pathLength)
 	QueryPerformanceCounter(&start);
 
 	AssetDescriptor descriptor;
-	ret = (*converterFunc)(&descriptor.asset, dataFile, fileSize, buffer, basePathLength, m_assetAllocator, ALLOCATOR_IDX_ASSET_DATA);
+	ret = (*converterFunc)(&descriptor.asset, dataFile, fileSize, buffer, basePathLength, m_assetAllocator, ALLOCATOR_IDX_ASSET_DATA, *this);
 
 	QueryPerformanceCounter(&end);				//end timing
 
@@ -221,7 +220,7 @@ int32_t AssetManager::LoadAsset(const char* path, uint32_t pathLength)
 
 	//offset the pointer in memory
 	m_cacheEntries;
-
+	
 	CacheEntry* cacheEntry = (CacheEntry*)AllocateVirtualMemory(ALLOCATOR_IDX_CACHE_ENTRY, m_cacheEntryAllocator,sizeof(CacheEntry));
 	m_cacheEntryCount++;
 	//CacheEntry* cacheEntry = m_cacheEntries + (m_cacheEntryCount++);
@@ -283,9 +282,9 @@ int32_t AssetManager::FlushAssets()
 	return 0;
 }
 
-int32_t AssetManager::GetAsset(const char* path, asset_s** outAsset)
+int32_t AssetManager::GetAsset(const char* path, Asset** outAsset)
 {
-	asset_s* out = NULL;
+	Asset* out = NULL;
 	int32_t ret = 0;
 
 	for (uint32_t i = 0; i < m_descriptorCount; i++)

@@ -4,14 +4,10 @@
 #include <string>
 #include <vulkan.h>
 #include <glm/glm.hpp>
-
-
 #include "Defines.h"
 #include "SwapChain.h"
 #include "VCTPipelineDefines.h"
-
 #include <GLFW\glfw3.h>
-
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define VK_FLAGS_NONE 0
@@ -40,38 +36,12 @@ struct DevicePools
 	VkCommandPool compute;
 	VkCommandPool transfer;
 };
-
-struct UBOData
-{
-	VkBuffer buffer;
-	VkDeviceMemory memory;
-	VkDescriptorBufferInfo descriptor;
-};
-
-// Vertices properties
-struct Vertices
-{
-	VkBuffer buf;			//device buffer
-	VkDeviceMemory mem;		//device memory
-	VkPipelineVertexInputStateCreateInfo inputState;
-	std::vector<VkVertexInputBindingDescription> bindingDescriptions;
-	std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
-};
-
-// Indices properties
-struct Indices
-{
-	VkBuffer buf;
-	VkDeviceMemory mem;
-};
-
 // Used to copy data from host to device memory
 struct StagingBuffer 
 {
 	VkDeviceMemory memory;
 	VkBuffer buffer;
 };
-
 // Device Information
 struct DeviceInformation
 {
@@ -81,8 +51,9 @@ struct DeviceInformation
 	VkPhysicalDeviceFeatures deviceFeatures;
 	// Stores all available memory (type) properties for the physical device
 	VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
+	// Store the device limits
+	VkPhysicalDeviceLimits deviceLimits;
 };
-
 // Semaphores within the grahpics render pipeline
 struct Semaphores
 {
@@ -90,7 +61,6 @@ struct Semaphores
 	VkSemaphore renderComplete;
 	VkSemaphore textOverlayComplete;
 };
-
 // Depth stencil
 struct DepthStencil
 {
@@ -98,7 +68,6 @@ struct DepthStencil
 	VkDeviceMemory mem;
 	VkImageView view;
 };
-
 class VulkanCore
 {
 public:
@@ -156,6 +125,18 @@ public:
 	inline GLFWwindow* GetGLFWWindow() { return m_glfwWindow; }
 	// Get swapchain
 	inline SwapChain* GetSwapChain() { return &m_swapChain; }
+	// Get device info
+	inline const DeviceInformation& GetDeviceInformation() { return m_grahpicsDeviceInfo; }
+	// Get pipeline cache
+	inline const VkPipelineCache GetPipelineCache() { return m_pipelineCache; }
+	// Get device queue indices
+	inline const DeviceQueueIndices& GetDeviceQueueIndices() { return m_deviceQueueIndices; }
+	// Get framebuffers
+	inline const VkFramebuffer* GetFramebuffers() { return m_frameBuffers.data(); }
+	inline uint32_t GetFramebufferCount() { return (uint32_t)m_frameBuffers.size(); }
+	// Get renderpass
+	inline const VkRenderPass GetRenderpass() { return m_renderPass; }
+	inline const glm::uvec2& GetScreenResolution() { return m_screenResolution; }
 
 	VkFormat m_colorFormat = VK_FORMAT_B8G8R8A8_UNORM;			// Color framebuffer format
 	VkFormat m_depthFormat;										// Depth framebuffer format
@@ -189,12 +170,7 @@ protected:
 	VkCommandBuffer m_setupCommandBuffer = VK_NULL_HANDLE;		// Command buffer used for setup
 	VkCommandBuffer m_postPresentCommandBuffer = VK_NULL_HANDLE;// Command buffer used for a post present image barrier
 	VkCommandBuffer m_prePresentCommandBuffer = VK_NULL_HANDLE;	// Command buffer used for a pre present image barrier
-	// Vertex and indices information
-	Vertices m_vertices;
-	Indices m_indices;
-	// Uniform buffer object Vertex shader
-	StaticUBO m_uboVS;
-	UBOData m_uboData;
+	
 	uint32_t m_currentFrameBuffer; // keep track of the current active framebuffer
 	glm::uvec2 m_screenResolution;	//Screen resolution
 };

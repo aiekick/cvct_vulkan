@@ -3,7 +3,6 @@
 
 #include <string>
 #include <iostream>
-
 #include <vulkan.h>
 #include "DataTypes.h"
 
@@ -29,6 +28,8 @@ namespace VKTools
 	// Selected a suitable supported depth format starting with 32 bit down to 16 bit
 	// Returns false if none of the depth formats in the list is supported by the device
 	extern VkBool32 GetSupportedDepthFormat(VkPhysicalDevice physicalDevice, VkFormat *depthFormat);
+	// Get memory type for a given memory allocation ( flags and bits)
+	extern uint32_t GetMemoryType(VulkanCore* core, uint32_t typeBits, VkFlags properties);
 	// Fatal error with message box
 	extern void ExitFatal(std::string message, std::string caption);
 	// Put an image memory barrier for setting an image layout on the sub resource into the given command buffer
@@ -46,9 +47,12 @@ namespace VKTools
 		VkImageLayout oldImageLayout,
 		VkImageLayout newImageLayout);
 	// Commandbuffer helper functions
-	extern int32_t FlushCommandBuffer(	VkCommandBuffer commandBuffer, VkQueue queue,
-								VkDevice viewDevice, VkCommandPool commandPool, 
-								bool free);
+	extern int32_t FlushCommandBuffer(	
+		VkCommandBuffer commandBuffer, 
+		VkQueue queue,
+		VkDevice viewDevice,
+		VkCommandPool commandPool, 
+		bool free);
 	// Create Buffers
 	extern uint32_t CreateBuffer(VulkanCore* core,
 		VkDevice device,
@@ -58,7 +62,6 @@ namespace VKTools
 		void* data,
 		VkBuffer * buffer,
 		VkDeviceMemory * memory);
-
 	extern uint32_t CreateBuffer(VulkanCore* core,
 		VkDevice device,
 		VkBufferUsageFlags usage,
@@ -68,24 +71,30 @@ namespace VKTools
 		VkBuffer * buffer,
 		VkDeviceMemory * memory,
 		VkDescriptorBufferInfo * descriptor);
-	//attatchment creations
+	// Copy buffer
+	extern uint32_t CopyBuffer(VulkanCore* core,
+		VkDevice device,
+		VkCommandPool commandpool,
+		VkQueue queue,
+		VkBuffer src,
+		VkBuffer dst,
+		uint32_t size);
+	// Attatchment creations
 	extern void CreateAttachment(
 		VkDevice device,
 		VulkanCore* core,
 		VkFormat format,
 		VkImageUsageFlagBits usage,
-		FrameBufferAttachment *attachment,
+		FrameBufferAttachment* attachment,
 		uint32_t width,
 		uint32_t height);
-
 	extern void CreateImage(
 		VulkanCore* core,
 		VkFormat format,
-		FrameBufferAttachment *attachment,
+		FrameBufferAttachment* attachment,
 		uint32_t width,
 		uint32_t height);
-
-	//initaialize functions
+	// Initaialize functions
 	namespace Initializers
 	{
 		// Buffer helper functions
@@ -113,18 +122,19 @@ namespace VKTools
 		extern VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo(VkDescriptorPool descriptorPool, uint32_t descriptorSetCount, const VkDescriptorSetLayout* setLayouts);
 		extern VkPushConstantRange PushConstantRange(VkShaderStageFlags flags, uint32_t offset, uint32_t size);
 		extern VkVertexInputAttributeDescription VertexInputAttributeDescription(uint32_t binding, uint32_t location, VkFormat format, uint32_t offset);
-		VkPipelineVertexInputStateCreateInfo PipelineVertexInputStateCreateInfo();
-		VkPipelineInputAssemblyStateCreateInfo PipelineInputAssemblyStateCreateInfo(VkPrimitiveTopology topology, VkPipelineInputAssemblyStateCreateFlags flags, VkBool32 primitiveRestartEnable);
-		VkPipelineRasterizationStateCreateInfo PipelineRasterizationStateCreateInfo(VkPolygonMode polygonMode, VkCullModeFlags cullMode, VkFrontFace frontFace, VkPipelineRasterizationStateCreateFlags flags);
-		VkPipelineColorBlendAttachmentState PipelineColorBlendAttachmentState(VkColorComponentFlags colorWriteMask, VkBool32 blendEnable);
-		VkPipelineColorBlendStateCreateInfo PipelineColorBlendStateCreateInfo(uint32_t attachmentCount, const VkPipelineColorBlendAttachmentState * pAttachments);
-		VkPipelineDepthStencilStateCreateInfo PipelineDepthStencilStateCreateInfo(VkBool32 depthTestEnable, VkBool32 depthWriteEnable, VkCompareOp depthCompareOp);
-		VkPipelineViewportStateCreateInfo PipelineViewportStateCreateInfo(uint32_t viewportCount, uint32_t scissorCount, VkPipelineViewportStateCreateFlags flags);
-		VkPipelineDynamicStateCreateInfo PipelineDynamicStateCreateInfo(const VkDynamicState * pDynamicStates, uint32_t dynamicStateCount, VkPipelineDynamicStateCreateFlags flags);
-		VkPipelineMultisampleStateCreateInfo PipelineMultisampleStateCreateInfo(VkSampleCountFlagBits rasterizationSamples, VkPipelineMultisampleStateCreateFlags flags);
-		VkDescriptorImageInfo DescriptorImageInfo(VkSampler sampler, VkImageView imageView, VkImageLayout imageLayout);
-		VkWriteDescriptorSet WriteDescriptorSet(VkDescriptorSet dstSet, VkDescriptorType type, uint32_t binding, VkDescriptorBufferInfo * bufferInfo);
-		VkWriteDescriptorSet WriteDescriptorSet(VkDescriptorSet dstSet, VkDescriptorType type, uint32_t binding, VkDescriptorImageInfo * imageInfo);
+		extern VkPipelineVertexInputStateCreateInfo PipelineVertexInputStateCreateInfo();
+		extern VkPipelineInputAssemblyStateCreateInfo PipelineInputAssemblyStateCreateInfo(VkPrimitiveTopology topology, VkPipelineInputAssemblyStateCreateFlags flags, VkBool32 primitiveRestartEnable);
+		extern VkPipelineRasterizationStateCreateInfo PipelineRasterizationStateCreateInfo(VkPolygonMode polygonMode, VkCullModeFlags cullMode, VkFrontFace frontFace, VkPipelineRasterizationStateCreateFlags flags);
+		extern VkPipelineColorBlendAttachmentState PipelineColorBlendAttachmentState(VkColorComponentFlags colorWriteMask, VkBool32 blendEnable);
+		extern VkPipelineColorBlendStateCreateInfo PipelineColorBlendStateCreateInfo(uint32_t attachmentCount, const VkPipelineColorBlendAttachmentState * pAttachments);
+		extern VkPipelineDepthStencilStateCreateInfo PipelineDepthStencilStateCreateInfo(VkBool32 depthTestEnable, VkBool32 depthWriteEnable, VkCompareOp depthCompareOp);
+		extern VkPipelineViewportStateCreateInfo PipelineViewportStateCreateInfo(uint32_t viewportCount, uint32_t scissorCount, VkPipelineViewportStateCreateFlags flags);
+		extern VkPipelineDynamicStateCreateInfo PipelineDynamicStateCreateInfo(const VkDynamicState * pDynamicStates, uint32_t dynamicStateCount, VkPipelineDynamicStateCreateFlags flags);
+		extern VkPipelineMultisampleStateCreateInfo PipelineMultisampleStateCreateInfo(VkSampleCountFlagBits rasterizationSamples, VkPipelineMultisampleStateCreateFlags flags);
+		extern VkDescriptorImageInfo DescriptorImageInfo(VkSampler sampler, VkImageView imageView, VkImageLayout imageLayout);
+		extern VkWriteDescriptorSet WriteDescriptorSet(VkDescriptorSet dstSet, VkDescriptorType type, uint32_t binding, VkDescriptorBufferInfo * bufferInfo);
+		extern VkWriteDescriptorSet WriteDescriptorSet(VkDescriptorSet dstSet, VkDescriptorType type, uint32_t binding, VkDescriptorImageInfo * imageInfo);
+		extern VkBufferMemoryBarrier BufferMemoryBarrier();
 	}
 }
 

@@ -3,17 +3,45 @@
 
 #include <glm/glm.hpp>
 #include <vulkan.h>
+#include <vector>
+
+// Texture & Mesh defines
+#define MAXTEXTURES 128			// Number of max textures
+#define MAXMESHES 512			// Number of max meshes
+#define MAXSCENES 12			// Number of max loaded opengex models
+#define MAXGRIDMIP 16
+#define ASSETPATH "Assets/"
 
 struct TextureMipMapperUBOComp;
-struct UniformData;
+struct BufferObject;
 struct AnisotropicVoxelTexture;
+struct IsotropicVoxelTexture;
 class Camera;
 struct CVCTSettings;
 class SwapChain;
 
-enum VoxelDirections { POSX, NEGX, POSY, NEGY, POSZ, NEGZ, NUM_DIRECTIONS };
+enum VoxelDirections { POSX = 0, NEGX, POSY, NEGY, POSZ, NEGZ, NUM_DIRECTIONS };
+enum VoxelAxis{ AXIS_YZ = 0, AXIS_XZ, AXIS_XY };
+const uint32_t INVALID_TEXTURE = 0xFFFFFF;
 
-struct mesh_s
+struct Vertices
+{
+	VkBuffer buf;			
+	VkDeviceMemory mem;	
+	VkPipelineVertexInputStateCreateInfo inputState;
+	VkVertexInputBindingDescription* bindingDescriptions;
+	uint32_t bindingDescriptionCount;
+	VkVertexInputAttributeDescription* attributeDescriptions;
+	uint32_t attributeDescriptionCount;
+};
+
+struct Indices
+{
+	VkBuffer buf;
+	VkDeviceMemory mem;
+};
+
+struct Mesh
 {
 	uint32_t primitiveType;
 	uint32_t vertexBufferStartIndex;
@@ -23,7 +51,7 @@ struct mesh_s
 	uint64_t vertexCount;
 };
 
-struct model_ref_s
+struct Modelref
 {
 	uint64_t nameOffset;
 	uint32_t modelIndex;
@@ -32,58 +60,58 @@ struct model_ref_s
 	glm::mat4 transform;
 };
 
-struct model_s
+struct Model
 {
 	uint32_t meshStartIndex;
 	uint32_t meshCount;
 };
 
-struct material_s
+struct Material
 {
 	uint64_t nameStringOffset;
 	uint32_t textureReferenceStart;
 	uint32_t textureReferenceCount;
 };
 
-struct texture_s
+struct Texture
 {
 	uint64_t pathOffset;
 };
 
-struct texture_ref_s
+struct Textureref
 {
 	uint64_t attribOffset;
 	uint32_t textureIndex;
 };
 
-struct point_light_s
+struct Pointlight
 {
 	uint64_t nameOffset;
 	glm::mat4 transform;
-	float color[3];
+	glm::vec3 color;
 	float constantAttenuation, linearAttenuation, quadraticAttenuation, attenuationScale, attenuationOffset;
 	uint32_t flags;
 };
 
-struct spot_light_s
+struct Spotlight
 {
 	uint64_t nameOffset;
 	glm::mat4 transform;
-	float color[3];
+	glm::vec3 color;
 	float constantAttenuation, linearAttenuation, quadraticAttenuation, attenuationScale, attenuationOffset;
 	float outerAngle, innerAngle;
 	uint32_t flags;
 };
 
-struct directional_light_s
+struct Directionallight
 {
 	uint64_t nameOffset;
-	float direction[3];
-	float color[3];
+	glm::vec3 direction;
+	glm::vec3 color;
 	uint32_t flags;
 };
 
-struct vertex_buffer_s
+struct Vertexbuffer
 {
 	uint32_t elementType;
 	uint32_t elementCount;
@@ -93,7 +121,7 @@ struct vertex_buffer_s
 	uint64_t totalSize;
 };
 
-struct index_buffer_s
+struct Indexbuffer
 {
 	uint32_t indexByteSize;
 	uint32_t materialSlotIndex;
@@ -102,19 +130,19 @@ struct index_buffer_s
 	uint64_t totalSize;
 };
 
-struct scene_s
+struct Scene
 {
-	model_s* models;
-	mesh_s* meshes;
-	material_s* materials;
-	vertex_buffer_s* vertexBuffers;
-	index_buffer_s* indexBuffers;
-	model_ref_s* modelRefs;
-	texture_s* textures;
-	texture_ref_s* textureRefs;
-	spot_light_s* spotLights;
-	point_light_s* pointLights;
-	directional_light_s* directionalLights;
+	Model* models;
+	Mesh* meshes;
+	Material* materials;
+	Vertexbuffer* vertexBuffers;
+	Indexbuffer* indexBuffers;
+	Modelref* modelRefs;
+	Texture* textures;
+	Textureref* textureRefs;
+	Spotlight* spotLights;
+	Pointlight* pointLights;
+	Directionallight* directionalLights;
 
 	uint32_t* materialIndices;
 	//uint32_t* meshIndices;
@@ -145,7 +173,7 @@ struct scene_s
 	uint32_t directionalLightCount;
 };
 
-struct asset_s
+struct Asset
 {
 	uint64_t type;
 	uint64_t size;
@@ -155,7 +183,7 @@ struct asset_s
 struct AssetDescriptor
 {
 	char name[512];
-	asset_s asset;
+	Asset asset;
 };
 
 struct AssetCacheHeader
@@ -174,7 +202,7 @@ struct CacheEntry
 	uint64_t contentLength;
 	const char* dependenciesStart;
 	uint32_t dependencyCount;
-	asset_s asset;
+	Asset asset;
 };
 
 enum
@@ -188,17 +216,17 @@ enum
 };
 
 //image data structures
-struct mip_desc_s
+struct MipDesc
 {
 	uint32_t width, height;
 	uint32_t offset;
 };
 
 #pragma warning(disable: 4200)
-struct image_desc_s
+struct ImageDesc
 {
 	uint32_t width, height, mipCount;
-	mip_desc_s* mips;
+	MipDesc* mips;
 };
 
 struct vk_ib_s
@@ -208,32 +236,43 @@ struct vk_ib_s
 	uint64_t offset, count;
 };
 
-enum TextureIndex
+struct BufferObject
 {
-	DIFFUSE_TEXTURE = 0,
-	NORMAL_TEXTURE = 1,
-	OPACITY_TEXTURE = 2,
-
-	TEXTURE_NUM,
+	VkBuffer				buffer;
+	VkDeviceMemory			memory;
+	VkDescriptorBufferInfo	descriptor;
+	uint32_t				allocSize;
+	BYTE*					mapped;
 };
 
-struct vk_mesh_s
+enum TextureIndex
+{
+	DIFFUSE_TEXTURE,
+	NORMAL_TEXTURE,
+	OPACITY_TEXTURE,
+	EMISSION_TEXTURE,
+
+	TEXTURE_COUNT
+};
+
+struct VKSubMesh
+{
+	vk_ib_s ibv;
+	uint32_t indexCount;
+	uint32_t textureIndex[TextureIndex::TEXTURE_COUNT];
+};
+
+struct VKMesh
 {
 	VkBuffer vertexResources[8];
 	uint64_t vertexStrides[8];
 	uint64_t vertexOffsets[8];
-	struct
-	{
-		vk_ib_s ibv;
-		uint32_t indexCount;
-		uint32_t textureIndex[TextureIndex::TEXTURE_NUM];
-
-	} submeshes[4];
+	VKSubMesh* submeshes;
 	uint32_t vbvCount, submeshCount;
 	uint64_t vertexCount;
 };
 
-struct vk_texture_s
+struct VKTexture
 {
 	uint32_t				width, height, mipCount, descriptorSetCount;
 	VkSampler				sampler;
@@ -244,7 +283,20 @@ struct vk_texture_s
 	//VkFormat				format;
 	VkDeviceMemory			deviceMemory;
 	TextureMipMapperUBOComp*	ubo;
-	UniformData*			uboDescriptor;
+	BufferObject*			boDescriptor;
+};
+
+struct VKScene
+{
+	Scene* scene;
+	VkBuffer scenebuffer;
+	VkDeviceMemory scenememory;
+	Vertices vertices;
+	Indices indices;
+	uint32_t textureOffset;
+	glm::mat4 modelMatrix;
+	VKMesh* vkmeshes;
+	uint32_t vkmeshCount;
 };
 
 enum VertexOffset
@@ -337,5 +389,122 @@ struct ImGUIParameters
 	uint32_t* conecount;
 };
 
+#define PREVOXELGRID_COUNT 16 //4*4
+
+enum CascadeAttributes
+{
+	ALBEDO_OPACITY_GRID = 0,
+	NORMAL_GRID = 1,
+	EMISSION_GRID = 2,
+	DIRECT_LIGHT_GRID = 3,
+	BOUNCE_LIGHT_GRID = 4,
+
+	CASCADE_ATTRIBUTE_COUNT,
+};
+
+struct CascadeAttribute
+{
+	struct PreVoxelGrid
+	{
+		AnisotropicVoxelTexture* preGrid;
+
+	}preVoxelGrid[16 * 3];
+	AnisotropicVoxelTexture* texture;
+};
+
+struct Cascade
+{
+	CascadeAttribute attributes[CASCADE_ATTRIBUTE_COUNT];
+};
+
+struct InstanceDataAABB
+{
+	glm::vec3 position;	// Middle position of the AABB
+	float padding0;
+	glm::vec3 size;		// Size of the AABB
+	float padding1;
+};
+
+// Indirect draw statistics (updated via compute)
+struct InstanceStatistic
+{
+	uint32_t drawCount;						// Total number of indirect draw counts to be issued
+};
+
+struct PerSubMeshUBO
+{
+	uint32_t idxDiffuse;
+	uint32_t idxNormal;
+	uint32_t idxOpacity;
+	uint32_t idxEmission;
+	BYTE padding0[240];
+};
+
+struct PerSceneUBO
+{
+	glm::mat4 modelMatrix;
+	BYTE padding[192];
+};
+
+struct CameraUBO
+{
+	glm::mat4 projectionMatrix;
+	glm::mat4 viewMatrix;
+	glm::vec3 cameraPosition;	float padding0;
+	glm::vec3 forwardVector;	float padding1;
+	glm::vec3 upVector;			float padding2;
+	glm::vec2 offset0;			glm::vec2 padding3;
+};
+
+struct IsotropicVoxelTexture
+{
+	uint32_t width, height, depth, mipcount, cascadecount;
+	VkSampler sampler;
+	VkSampler conetraceSampler;
+	VkImage image;
+	VkImageLayout imagelayout;
+	VkImageView view[MAXGRIDMIP];
+	VkDescriptorImageInfo descriptor[MAXGRIDMIP];
+	VkFormat format;
+	VkDeviceMemory deviceMemory;
+};
+
+struct AnisotropicVoxelTexture
+{
+	uint32_t				width, height, depth, mipcount, cascadecount;
+	VkSampler				sampler;
+	VkSampler				conetraceSampler;
+	VkImage					image;
+	VkImageLayout			imageLayout;
+	VkImageView				view[MAXGRIDMIP];	// ordered as dir1mip0,dir1mip1,dir1mip2, dir2mip0,dir2mip1
+	VkDescriptorImageInfo	descriptor[MAXGRIDMIP];
+	VkFormat				format;
+	VkDeviceMemory			deviceMemory;
+	VkDeviceMemory			alphaDeviceMemory;
+};
+
+// Used for voxelization, and AA
+struct VoxelizerGrid
+{
+	IsotropicVoxelTexture albedoOpacity;// RGBA8
+	IsotropicVoxelTexture normal;		// RGBA8
+	IsotropicVoxelTexture emission;		// RGBA8
+};
+// Used to sample indirect illumination
+struct VoxelGrid
+{
+	AnisotropicVoxelTexture albedoOpacity;	// RGBA8
+	AnisotropicVoxelTexture normal;			// RGBA8
+	AnisotropicVoxelTexture emission;		// RGBA8
+	AnisotropicVoxelTexture bufferPosition;	// RGBA8
+	BufferObject surfacelist;				// cascade, axis, z,y,x 
+};
+
+struct DebugBox
+{
+	glm::vec3 position;	float padding0;	// Center position
+	glm::vec3 size;		float padding1;	// Diagonal size
+	glm::vec3 color;	float padding2;	// Color of outline
+};
 
 #endif	//DATATYPES_H

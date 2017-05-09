@@ -22,6 +22,15 @@
     <Filter Include="PipelineStates">
       <UniqueIdentifier>{3cbeaca2-dcf6-4aa5-a82b-03c785eea60f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shaders\renderers">
+      <UniqueIdentifier>{fa6ae5b1-355a-48b3-8f1a-876fc2608b13}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\util">
+      <UniqueIdentifier>{9449c3a9-410a-40c2-83b8-f0708565ed54}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\debug">
+      <UniqueIdentifier>{03c3a1b6-bec0-4cbe-853b-d7a54618458c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <Text Include="ReadMe.txt" />
@@ -79,16 +88,7 @@
     <ClCompile Include="source\AnisotropicVoxelTexture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\VoxelizerDebugState.cpp">
-      <Filter>PipelineStates</Filter>
-    </ClCompile>
     <ClCompile Include="source\MipMapperState.cpp">
-      <Filter>PipelineStates</Filter>
-    </ClCompile>
-    <ClCompile Include="source\ShadowMapState.cpp">
-      <Filter>PipelineStates</Filter>
-    </ClCompile>
-    <ClCompile Include="source\ConeTraceState.cpp">
       <Filter>PipelineStates</Filter>
     </ClCompile>
     <ClCompile Include="source\PostVoxelizerState.cpp">
@@ -97,22 +97,22 @@
     <ClCompile Include="source\imgui_impl_glfw_vulkan.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\ImguiState.cpp">
-      <Filter>PipelineStates</Filter>
-    </ClCompile>
     <ClCompile Include="source\PipelineStates.cpp">
       <Filter>PipelineStates</Filter>
     </ClCompile>
-    <ClCompile Include="source\DeferredMainRenderState.cpp">
+    <ClCompile Include="source\VoxelizerState.cpp">
       <Filter>PipelineStates</Filter>
     </ClCompile>
-    <ClCompile Include="source\ForwardMainRenderState.cpp">
+    <ClCompile Include="source\VoxelGridCullingState.cpp">
       <Filter>PipelineStates</Filter>
+    </ClCompile>
+    <ClCompile Include="source\SceneTools.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\ForwardRenderState.cpp">
       <Filter>PipelineStates</Filter>
     </ClCompile>
-    <ClCompile Include="source\VoxelizerState.cpp">
+    <ClCompile Include="source\DebugBoxState.cpp">
       <Filter>PipelineStates</Filter>
     </ClCompile>
   </ItemGroup>
@@ -201,6 +201,12 @@
     <ClInclude Include="source\imgui_impl_glfw_vulkan.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="source\SceneTools.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\MemoryAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="external\imgui\LICENSE">
@@ -209,56 +215,68 @@
     <None Include="external\imgui\README.md">
       <Filter>Dependencies</Filter>
     </None>
-    <None Include="bin\shaders\voxelizer.geom">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\diffuse.frag">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\diffuse.vert">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelizer.frag">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelizer.vert">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelizerdebug.frag">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelizerdebug.geom">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelizerdebug.vert">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelmipmapper.comp">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\texturemipmapper.comp">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\mainrenderer.frag">
-      <Filter>Shaders</Filter>
-    </None>
     <None Include="bin\shaders\conetrace.comp">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\voxelizerpost.comp">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\renderers</Filter>
     </None>
     <None Include="bin\shaders\deferredmaincomposition.vert">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="bin\shaders\deferredmainscaledgbuffer.frag">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\renderers</Filter>
     </None>
     <None Include="bin\shaders\deferredmainnonscaledcomposition.frag">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\renderers</Filter>
     </None>
     <None Include="bin\shaders\deferredmainscaledcomposition.frag">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\renderers</Filter>
+    </None>
+    <None Include="bin\shaders\deferredmainscaledgbuffer.frag">
+      <Filter>Shaders\renderers</Filter>
+    </None>
+    <None Include="bin\shaders\diffuse.frag">
+      <Filter>Shaders\renderers</Filter>
+    </None>
+    <None Include="bin\shaders\diffuse.vert">
+      <Filter>Shaders\renderers</Filter>
+    </None>
+    <None Include="bin\shaders\mainrenderer.frag">
+      <Filter>Shaders\renderers</Filter>
+    </None>
+    <None Include="bin\shaders\gridculling.comp">
+      <Filter>Shaders\util</Filter>
+    </None>
+    <None Include="bin\shaders\texturemipmapper.comp">
+      <Filter>Shaders\util</Filter>
+    </None>
+    <None Include="bin\shaders\voxelizer.frag">
+      <Filter>Shaders\util</Filter>
+    </None>
+    <None Include="bin\shaders\voxelizer.geom">
+      <Filter>Shaders\util</Filter>
+    </None>
+    <None Include="bin\shaders\voxelizer.vert">
+      <Filter>Shaders\util</Filter>
+    </None>
+    <None Include="bin\shaders\voxelmipmapper.comp">
+      <Filter>Shaders\util</Filter>
+    </None>
+    <None Include="bin\shaders\voxelizerdebug.vert">
+      <Filter>Shaders\debug</Filter>
+    </None>
+    <None Include="bin\shaders\voxelizerdebug.frag">
+      <Filter>Shaders\debug</Filter>
+    </None>
+    <None Include="bin\shaders\voxelizerdebug.geom">
+      <Filter>Shaders\debug</Filter>
+    </None>
+    <None Include="bin\shaders\debugboxrenderer.frag">
+      <Filter>Shaders\debug</Filter>
+    </None>
+    <None Include="bin\shaders\debugboxrenderer.geom">
+      <Filter>Shaders\debug</Filter>
+    </None>
+    <None Include="bin\shaders\debugboxrenderer.vert">
+      <Filter>Shaders\debug</Filter>
+    </None>
+    <None Include="bin\shaders\postvoxelizer.comp">
+      <Filter>Shaders\util</Filter>
     </None>
   </ItemGroup>
 </Project>

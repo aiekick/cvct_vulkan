@@ -1,35 +1,36 @@
 #include "Shader.h"
-#include "Defines.h"
+#include "MemoryAllocator.h"
 #include "VKTools.h"
 #include <stdio.h>
 #include <assert.h>
 #include "DataTypes.h"
+#include "AssetManager.h"
 
 //loading shader binary
 uint32_t ConvertAsset_HLSL_Bytecode
 (
-	asset_s* outAsset,
+	Asset* outAsset,
 	const void* data,
 	uint64_t dataSizeInBytes,
 	const char* basePath,
 	uint32_t basePathLength,
 	Memory_Linear_Allocator* allocator,
-	uint32_t allocatorIdx
-)
+	uint32_t allocatorIdx,
+	AssetManager& assetmanager)
 {
 	return 0;
 }
 
 uint32_t ConvertAsset_SPIRV
 (
-	asset_s* outAsset,
+	Asset* outAsset,
 	const void* data,
 	uint64_t dataSizeInBytes,
 	const char* basePath,
 	uint32_t basePathLength,
 	Memory_Linear_Allocator* allocator,
-	uint32_t allocatorIdx
-)
+	uint32_t allocatorIdx,
+	AssetManager& assetmanager)
 {
 	return 0;
 }
