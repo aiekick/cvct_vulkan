@@ -16,7 +16,7 @@
 	1. Redistributions of source code must retain the entire text of this license,
 	comprising the above copyright notice, this list of conditions, and the following
 	disclaimer.
-	
+
 	2. Redistributions of any modified source code files must contain a prominent
 	notice immediately following this license stating that the contents have been
 	modified from their original form.
@@ -41,13 +41,168 @@
 */
 
 #include "OpenGEX.h"
+
+#include <windows.h>
 #include <stdint.h>
 #include <assert.h>
+
 #include "AssetManager.h"
-#include "MemoryAllocator.h"
-#include "SceneTools.h"
+#include "MurmurHash.h"
+#include "Defines.h"
 
 using namespace OGEX;
+
+#define DEFAULT_SEED 0xA86F13C7
+
+extern void LoadAssetStaticManager(char* path, uint32_t pathLenght);
+
+enum upVector
+{
+	UP_VECTOR_X,
+	UP_VECTOR_Y,
+	UP_VECTOR_Z
+};
+
+enum
+{
+	MESH_PRIMITIVE_TYPE_TRIANGLE_LIST = 1
+};
+
+enum
+{
+	FLAG_HAS_POSITION = (1 << 0),
+	FLAG_HAS_TEXCOORD = (1 << 1),
+	FLAG_HAS_TANGENT = (1 << 2),
+	FLAG_HAS_NORMAL = (1 << 3),
+};
+
+enum
+{
+	VERTEX_BUFFER_ELEMENT_TYPE_HALF,
+	VERTEX_BUFFER_ELEMENT_TYPE_FLOAT,
+	VERTEX_BUFFER_ELEMENT_TYPE_DOUBLE
+};
+
+struct OgexScanInfo
+{
+	uint32_t modelCount, meshCount, materialCount;
+	uint32_t modelReferenceCount;
+	uint32_t materialReferenceCount, textureReferenceCount;
+	uint32_t pointLightCount, spotLightCount, directionalLightCount;
+
+	uint32_t vertexArrayCount, indexArrayCount;
+	uint64_t totalVertexByteCount, totalIndexByteCount;
+	uint32_t flags;
+
+	struct OgexStringTableEntry
+	{
+		uint64_t hash;
+		union
+		{
+			const char* strPtr;
+			uint64_t offset;
+		};
+	} *stringTable;
+
+	uint32_t stringTableSlots;
+
+	struct ogesTextureTableEntry
+	{
+		uint64_t pathOffset;
+		uint32_t textureIndex;
+	}*textureTable;
+	uint32_t textureTableSlots;
+	uint32_t textureCount;
+
+	//////////////////////////
+
+	void AddString(const char* string)
+	{
+		uint64_t out[2];
+		MurmurHash3_x64_128(string, (int)strlen(string), DEFAULT_SEED, out);
+
+		uint64_t slot = out[1] % stringTableSlots;
+		for (uint32_t i = 0; i < 32; i++)
+		{
+			if (stringTable[slot].strPtr == NULL)
+			{
+				stringTable[slot].strPtr = string;
+				stringTable[slot].hash = out[0];
+				return;
+			}
+			else if (stringTable[slot].hash == out[0])
+			{
+				assert(strcmp(string, stringTable[slot].strPtr) == 0);	// Make sure this is not a hash collision
+				return;	// Already in the table; Dupe!
+			}
+			out[1] = Hash64Shift(out[1]);
+			slot = out[1] % stringTableSlots;
+		}
+		assert(false); // Could not find an empty slot!
+	}
+
+	uint64_t FindStringOffset(const char* string)
+	{
+		uint64_t out[2];
+		MurmurHash3_x64_128(string, (int)strlen(string), DEFAULT_SEED, out);
+
+		uint64_t slot = out[1] % stringTableSlots;
+		for (uint32_t i = 0; i < 32; i++)
+		{
+			assert(stringTable[slot].offset != 0xFFFFFFFFFFFFFFFFULL);
+			if (stringTable[slot].hash == out[0])
+			{
+				return stringTable[slot].offset;
+			}
+			out[1] = Hash64Shift(out[1]);
+			slot = out[1] % stringTableSlots;
+		}
+		assert(false); // Could not find an empty slot!
+		return 0xFFFFFFFFFFFFFFFF;
+	}
+
+	//////////////////////////
+
+	uint32_t AddTexture(uint64_t pathOffset)
+	{
+		uint64_t hash = pathOffset;
+		uint64_t slot = hash % textureTableSlots;
+		for (uint32_t i = 0; i < 32; i++)
+		{
+			if (textureTable[slot].pathOffset == 0xFFFFFFFFFFFFFFFF)
+			{
+				textureTable[slot].pathOffset = pathOffset;
+				textureTable[slot].textureIndex = textureCount++;
+				return textureTable[slot].textureIndex;
+			}
+			else if (textureTable[slot].pathOffset == pathOffset)
+			{
+				return textureTable[slot].textureIndex;	// Already in the table; Dupe!
+			}
+			hash = Hash64Shift(hash);
+			slot = hash % textureTableSlots;
+		}
+		assert(false); // Could not find an empty slot!
+		return 0xFFFFFFFF;
+	}
+
+	uint32_t FindTexture(uint64_t pathOffset)
+	{
+		uint64_t hash = pathOffset;
+		uint64_t slot = hash % textureTableSlots;
+		for (uint32_t i = 0; i < 32; i++)
+		{
+			if (textureTable[slot].pathOffset == pathOffset)
+			{
+				return textureTable[slot].textureIndex;
+			}
+			hash = Hash64Shift(hash);
+			slot = hash % textureTableSlots;
+		}
+		assert(false); // Could not find an empty slot!
+		return 0xFFFFFFFF;
+	}
+};
 
 OgexScanInfo* ScanInfo;
 
@@ -177,7 +332,7 @@ DataResult MetricStructure::ProcessData(DataDescription *dataDescription)
 	}
 	else if (metricKey == "up")
 	{
-		int32	direction = 0;
+		int32	direction;
 
 		if (structure->GetStructureType() != kDataString)
 		{
@@ -345,7 +500,6 @@ DataResult MaterialRefStructure::ProcessData(DataDescription *dataDescription)
 		return (kDataExtraneousSubstructure);
 	}
 
-
 	const DataStructure<RefDataType> *dataStructure = static_cast<const DataStructure<RefDataType> *>(structure);
 	if (dataStructure->GetDataElementCount() != 0)
 	{
@@ -357,18 +511,10 @@ DataResult MaterialRefStructure::ProcessData(DataDescription *dataDescription)
 				return (kDataOpenGexInvalidMaterialRef);
 			}
 
-			// edit
-			//if (structure->GetStructureType() == kStructureMaterialRef)
-			{
-				ScanInfo->textureReferenceCount++;
-			}
-
 			targetStructure = static_cast<const MaterialStructure *>(materialStructure);
 			return (kDataOkay);
 		}
 	}
-
-	
 
 	return (kDataBrokenRef);
 }
@@ -1066,19 +1212,6 @@ DataResult LightNodeStructure::ProcessData(DataDescription *dataDescription)
 			}
 
 			lightObjectStructure = static_cast<const LightObjectStructure *>(objectStructure);
-
-			if (lightObjectStructure->GetTypeString() == "infinite")
-			{
-				ScanInfo->directionalLightCount++;
-			}
-			else if (lightObjectStructure->GetTypeString() == "point")
-			{
-				ScanInfo->pointLightCount++;
-			}
-			else if (lightObjectStructure->GetTypeString() == "spot")
-			{
-				ScanInfo->spotLightCount++;
-			}
 		}
 
 		structure = structure->Next();
@@ -1090,8 +1223,6 @@ DataResult LightNodeStructure::ProcessData(DataDescription *dataDescription)
 	}
 
 	// Do application-specific node processing here.
-
-
 
 	return (kDataOkay);
 }
@@ -1229,8 +1360,8 @@ DataResult VertexArrayStructure::ProcessData(DataDescription *dataDescription)
 	switch (dataStructure->GetStructureType())
 	{
 	case ODDL::kDataHalf:
-		totalByteSize = 
-			sizeof(ODDL::HalfDataType::PrimType) 
+		totalByteSize =
+			sizeof(ODDL::HalfDataType::PrimType)
 			* static_cast<const ODDL::DataStructure<ODDL::HalfDataType>*>(dataStructure)->GetDataElementCount();
 		vertexCount =
 			static_cast<const ODDL::DataStructure<ODDL::HalfDataType>*> (dataStructure)->GetDataElementCount()
@@ -2037,7 +2168,7 @@ DataResult MeshStructure::ProcessData(DataDescription *dataDescription)
 				flags |= FLAG_HAS_NORMAL;
 
 			vertexArrayCount++;
-			
+
 		}
 		else if (type == kStructureIndexArray)
 		{
@@ -2277,7 +2408,6 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 			if (colorStructure->GetAttribString() == "light")
 			{
 				// Process light color here.
-				memcpy(&color, colorStructure->GetColor(), sizeof(float) * 4);
 			}
 		}
 		else if (type == kStructureParam)
@@ -2286,7 +2416,6 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 			if (paramStructure->GetAttribString() == "intensity")
 			{
 				// Process light intensity here.
-				intensity = paramStructure->GetParam();
 			}
 		}
 		else if (type == kStructureTexture)
@@ -2297,7 +2426,6 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 				const char *textureName = textureStructure->GetTextureName();
 
 				// Process light texture here.
-				//todo : later
 			}
 		}
 		else if (type == kStructureAtten)
@@ -2305,6 +2433,7 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 			const AttenStructure *attenStructure = static_cast<const AttenStructure *>(structure);
 			const String& attenKind = attenStructure->GetAttenKind();
 			const String& curveType = attenStructure->GetCurveType();
+
 			if (attenKind == "distance")
 			{
 				if ((curveType == "linear") || (curveType == "smooth"))
@@ -2313,8 +2442,6 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 					float endParam = attenStructure->GetEndParam();
 
 					// Process linear or smooth attenuation here.
-					float linear = beginParam;
-					float smooth = endParam;
 				}
 				else if (curveType == "inverse")
 				{
@@ -2322,8 +2449,6 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 					float linearParam = attenStructure->GetLinearParam();
 
 					// Process inverse attenuation here.
-					linear = linearParam;
-					scale = scaleParam;
 				}
 				else if (curveType == "inverse_square")
 				{
@@ -2331,8 +2456,6 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 					float quadraticParam = attenStructure->GetQuadraticParam();
 
 					// Process inverse square attenuation here.
-					scale = scaleParam;
-					quadratic = quadraticParam;
 				}
 				else
 				{
@@ -2341,19 +2464,15 @@ DataResult LightObjectStructure::ProcessData(DataDescription *dataDescription)
 			}
 			else if (attenKind == "angle")
 			{
-				float beginParam = attenStructure->GetBeginParam();
 				float endParam = attenStructure->GetEndParam();
+
 				// Process angular attenutation here.
-				angleinner = beginParam;
-				angleouter = endParam;
 			}
 			else if (attenKind == "cos_angle")
 			{
-				float beginParam = attenStructure->GetBeginParam();
 				float endParam = attenStructure->GetEndParam();
+
 				// Process angular attenutation here.
-				cosangleinner = beginParam;
-				cosangleouter = endParam;
 			}
 			else
 			{
@@ -2818,7 +2937,7 @@ MaterialStructure::MaterialStructure() : OpenGexStructure(kStructureMaterial)
 	materialName = nullptr;
 
 	//edit
-	//textureCount = 0;
+	textureCount = 0;
 }
 
 MaterialStructure::~MaterialStructure()
@@ -2877,10 +2996,10 @@ DataResult MaterialStructure::ProcessData(DataDescription *dataDescription)
 		if (structure->GetStructureType() == kStructureTexture)
 		{
 			textureCount++;
+			ScanInfo->textureReferenceCount++;
 		}
 		structure = structure->Next();
 	}
-	ScanInfo->textureCount += textureCount;
 	materialIndex = ScanInfo->materialCount++;
 
 	return (kDataOkay);
@@ -3781,7 +3900,7 @@ DataResult OpenGexDataDescription::ProcessData(void)
 	return (result);
 }
 
-void OgexReadNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Structure* node, glm::mat4* parentSceneTransform)
+void OgexReadNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::Structure* node, glm::mat4* parentSceneTransform)
 {
 	glm::mat4 sceneTransform = *parentSceneTransform;
 
@@ -3817,36 +3936,12 @@ void OgexReadNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Structur
 		String lightType = lightObject->GetTypeString();
 		if (lightType == "point")
 		{
-			assert(sceneInfo->pointLightCount);
-			sceneInfo->pointLightCount--;
-			Pointlight* light = sceneInfo->pointLights++;
-			light->transform = sceneTransform;
-			light->color[0] = lightObject->color[0], light->color[1] = lightObject->color[1], light->color[2] = lightObject->color[2];
-			light->constantAttenuation = lightObject->constant, light->linearAttenuation = lightObject->linear, light->quadraticAttenuation = lightObject->quadratic;
-			light->attenuationScale = lightObject->scale;
 		}
 		else if (lightType == "spot")
 		{
-			assert(sceneInfo->spotLightCount);
-			sceneInfo->spotLightCount--;
-			Spotlight* light = sceneInfo->spotLights++;
-			light->transform = sceneTransform;
-			light->color[0] = lightObject->color[0], light->color[1] = lightObject->color[1], light->color[2] = lightObject->color[2];
-			light->constantAttenuation = lightObject->constant, light->linearAttenuation = lightObject->linear, light->quadraticAttenuation = lightObject->quadratic;
-			light->attenuationScale = lightObject->scale;
-			light->outerAngle = lightObject->angleouter, light->innerAngle = lightObject->angleinner;
-				
 		}
 		else if (lightType == "infinite")
 		{
-			assert(sceneInfo->directionalLightCount);
-			sceneInfo->directionalLightCount--;
-			glm::vec3 forward = { 0.0f, 0.0f, -1.0f };
-			glm::vec3 direction = glm::vec3((glm::vec4(forward, 0) * sceneTransform));
-		
-			Directionallight* light = sceneInfo->directionalLights++;
-			light->direction = glm::normalize(direction);
-			light->color[0] = lightObject->color[0], light->color[1] = lightObject->color[1], light->color[2] = lightObject->color[2];
 		}
 	}
 	break;
@@ -3855,7 +3950,7 @@ void OgexReadNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Structur
 		assert(sceneInfo->modelReferenceCount);
 		sceneInfo->modelReferenceCount--;
 		const OGEX::GeometryNodeStructure* geom = static_cast<const OGEX::GeometryNodeStructure*> (node);
-		Modelref* modelRef = sceneInfo->modelRefs++;
+		model_ref_s* modelRef = sceneInfo->modelRefs++;
 		modelRef->nameOffset = scanInfo->FindStringOffset(geom->GetNodeName());
 		modelRef->modelIndex = geom->GetGeometryObject()->modelIndex;
 		modelRef->materialIndices = sceneInfo->materialIndices;
@@ -3884,13 +3979,13 @@ void OgexReadNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Structur
 	}
 }
 
-void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Structure* rootNode, const OGEX::OpenGexDataDescription* desc)
+void OgexReadRootNode(OgexScanInfo* scanInfo, scene_s* sceneInfo, const ODDL::Structure* rootNode, const OGEX::OpenGexDataDescription* desc)
 {
 	glm::mat4 transform = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 	switch (desc->GetUpDirection())
 	{
 	case 0:	// x = up
-		transform = 
+		transform =
 		{
 			0.0f, 1.0f, 0.0f, 0.0f,
 			1.0f, 0.0f, 0.0f, 0.0f,
@@ -3901,7 +3996,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 	case 1:	// y = up -> no transform
 		break;
 	case 2: // z = up
-		transform = 
+		transform =
 		{
 			1.0f, 0.0f, 0.0f, 0.0f,
 			0.0f, 0.0f, 1.0f, 0.0f,
@@ -3940,7 +4035,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 				assert(sceneInfo->modelCount);
 				sceneInfo->modelCount--;
 				const OGEX::GeometryObjectStructure* geom = static_cast<const OGEX::GeometryObjectStructure*> (subNode);
-				Model* model = sceneInfo->models++;
+				model_s* model = sceneInfo->models++;
 				model->meshStartIndex = geom->meshStart;
 				model->meshCount = geom->meshCount;
 
@@ -3969,7 +4064,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 
 						const OGEX::VertexArrayStructure* posVa = NULL;
 						const OGEX::VertexArrayStructure* texVa = NULL;
-						const OGEX::VertexArrayStructure* normVa = NULL; 
+						const OGEX::VertexArrayStructure* normVa = NULL;
 
 						glm::vec3* vertex = NULL;
 						glm::vec2* texcoord = NULL;
@@ -3990,7 +4085,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 									posVa = va;
 									vertex = (glm::vec3*)(sceneInfo->vertexData + sceneInfo->vertexDataSizeInBytes);
 								}
-								
+
 								else if (va->GetArrayAttrib() == "texcoord")
 								{
 									texVa = va;
@@ -4002,7 +4097,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 									normal = (glm::vec3*)(sceneInfo->vertexData + sceneInfo->vertexDataSizeInBytes);
 								}
 
-								Vertexbuffer* vb = sceneInfo->vertexBuffers + (sceneInfo->meshes[mesh->meshIndex].vertexBufferStartIndex + curVbCount);
+								vertex_buffer_s* vb = sceneInfo->vertexBuffers + (sceneInfo->meshes[mesh->meshIndex].vertexBufferStartIndex + curVbCount);
 								vb->elementType = va->elementType;
 								vb->elementCount = va->elementCount;
 								vb->vertexCount = va->vertexCount;
@@ -4017,7 +4112,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 							else if (type == OGEX::kStructureIndexArray)
 							{
 								const OGEX::IndexArrayStructure* ia = static_cast<const OGEX::IndexArrayStructure*> (subStructure);
-								Indexbuffer* ib = sceneInfo->indexBuffers + (sceneInfo->meshes[mesh->meshIndex].indexBufferStartIndex + curIbCount);
+								index_buffer_s* ib = sceneInfo->indexBuffers + (sceneInfo->meshes[mesh->meshIndex].indexBufferStartIndex + curIbCount);
 								ib->indexByteSize = ia->indexSize;
 								ib->materialSlotIndex = ia->GetMaterialIndex();
 								ib->indexCount = ia->indexCount;
@@ -4041,7 +4136,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 							assert(normVa->elementType == VERTEX_BUFFER_ELEMENT_TYPE_FLOAT && normVa->elementCount == 3);
 
 							//allocate vertex buffer for the tangent vectors
-							Vertexbuffer* tvb = sceneInfo->vertexBuffers + (sceneInfo->meshes[mesh->meshIndex].vertexBufferStartIndex + curVbCount);
+							vertex_buffer_s* tvb = sceneInfo->vertexBuffers + (sceneInfo->meshes[mesh->meshIndex].vertexBufferStartIndex + curVbCount);
 							tvb->elementType = VERTEX_BUFFER_ELEMENT_TYPE_FLOAT;
 							tvb->elementCount = 3;
 							tvb->vertexCount = posVa->vertexCount;
@@ -4051,7 +4146,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 							sceneInfo->vertexDataSizeInBytes += mesh->vertexCount * 3 * sizeof(float);
 
 							//allocate vetrex buffer for the bitangent vector
-							Vertexbuffer* bvb = sceneInfo->vertexBuffers + (sceneInfo->meshes[mesh->meshIndex].vertexBufferStartIndex + (curVbCount + 1));
+							vertex_buffer_s* bvb = sceneInfo->vertexBuffers + (sceneInfo->meshes[mesh->meshIndex].vertexBufferStartIndex + (curVbCount + 1));
 							bvb->elementType = VERTEX_BUFFER_ELEMENT_TYPE_FLOAT;
 							bvb->elementCount = 3;
 							bvb->vertexCount = posVa->vertexCount;
@@ -4066,7 +4161,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 							uint32_t triangleCount = 0, triIdx = 0;
 							for (uint32_t i = 0; i < sceneInfo->meshes[mesh->meshIndex].indexBufferCount; i++)
 							{
-								Indexbuffer* ib = sceneInfo->indexBuffers + (sceneInfo->meshes[mesh->meshIndex].indexBufferStartIndex + i);
+								index_buffer_s* ib = sceneInfo->indexBuffers + (sceneInfo->meshes[mesh->meshIndex].indexBufferStartIndex + i);
 								triangleCount += ib->indexCount / 3;
 							}
 
@@ -4082,7 +4177,7 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 
 							for (uint32_t i = 0; i < sceneInfo->meshes[mesh->meshIndex].indexBufferCount; i++)
 							{
-								Indexbuffer* ib = sceneInfo->indexBuffers + (sceneInfo->meshes[mesh->meshIndex].indexBufferStartIndex + i);
+								index_buffer_s* ib = sceneInfo->indexBuffers + (sceneInfo->meshes[mesh->meshIndex].indexBufferStartIndex + i);
 
 								assert(ib->indexByteSize == 4);
 								uint32_t* indexStart = (uint32_t*)(sceneInfo->indexData + ib->indexOffset);
@@ -4214,14 +4309,14 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 				assert(sceneInfo->materialCount);
 				sceneInfo->materialCount--;
 				const OGEX::MaterialStructure* mat = static_cast<const OGEX::MaterialStructure*> (subNode);
-				Material* material = sceneInfo->materials++;
+				material_s* material = sceneInfo->materials++;
 				material->nameStringOffset = scanInfo->FindStringOffset(mat->GetMaterialName());
 				material->textureReferenceStart = sceneInfo->textureReferenceCount;
 				material->textureReferenceCount = mat->textureCount;
 
 				sceneInfo->textureReferenceCount += mat->textureCount;
 
-				Textureref* texRef = sceneInfo->textureRefs + material->textureReferenceStart;
+				texture_ref_s* texRef = sceneInfo->textureRefs + material->textureReferenceStart;
 				const Structure *structure = mat->GetFirstSubstructure(OGEX::kStructureTexture);
 				while (structure)
 				{
@@ -4253,14 +4348,14 @@ void OgexReadRootNode(OgexScanInfo* scanInfo, Scene* sceneInfo, const ODDL::Stru
 
 uint32_t ConvertAsset_OpenGEX
 (
-	Asset* outAsset,
+	asset_s* outAsset,
 	const void* data,
 	uint64_t dataSizeInBytes,
 	const char* basePath,
 	uint32_t basePathLength,
 	Memory_Linear_Allocator* allocator,
-	uint32_t allocatorIdx,
-	AssetManager& assetmanager)
+	uint32_t allocatorIdx
+)
 {
 	OgexScanInfo scanInfo = {};
 	scanInfo.stringTableSlots = 2048;
@@ -4274,7 +4369,7 @@ uint32_t ConvertAsset_OpenGEX
 
 	if (res != ODDL::kDataOkay)
 		return (uint32_t)res;
-	
+
 	uint64_t totalStringLength = 0;
 	for (uint32_t i = 0; i < scanInfo.stringTableSlots; i++)
 	{
@@ -4285,7 +4380,7 @@ uint32_t ConvertAsset_OpenGEX
 	}
 
 	// Todo: fix this properly
-	scanInfo.textureTableSlots = (uint32_t)(scanInfo.textureReferenceCount);
+	scanInfo.textureTableSlots = (uint32_t)(scanInfo.textureReferenceCount * 1.5f);
 	scanInfo.textureTable = (OgexScanInfo::ogesTextureTableEntry*)_alloca(scanInfo.textureTableSlots * sizeof(scanInfo.textureTable[0]));
 	memset(scanInfo.textureTable, 0xFF, scanInfo.textureTableSlots * sizeof(scanInfo.textureTable[0]));
 
@@ -4315,36 +4410,36 @@ uint32_t ConvertAsset_OpenGEX
 	}
 
 	uint64_t memorySize =
-		sizeof(Scene)
-		+ scanInfo.modelCount * sizeof(Model)
-		+ scanInfo.meshCount * sizeof(Mesh)
-		+ scanInfo.materialCount * sizeof(Material)
-		+ scanInfo.vertexArrayCount * sizeof(Vertexbuffer)
-		+ scanInfo.indexArrayCount * sizeof(Indexbuffer)
-		+ scanInfo.modelReferenceCount * sizeof(Modelref)
-		+ scanInfo.textureCount * sizeof(Texture)
-		+ scanInfo.textureReferenceCount * sizeof(Textureref)
-		+ scanInfo.pointLightCount * sizeof(Pointlight)
-		+ scanInfo.spotLightCount * sizeof(Spotlight)
-		+ scanInfo.directionalLightCount * sizeof(Directionallight)
+		sizeof(scene_s)
+		+ scanInfo.modelCount * sizeof(model_s)
+		+ scanInfo.meshCount * sizeof(mesh_s)
+		+ scanInfo.materialCount * sizeof(material_s)
+		+ scanInfo.vertexArrayCount * sizeof(vertex_buffer_s)
+		+ scanInfo.indexArrayCount * sizeof(index_buffer_s)
+		+ scanInfo.modelReferenceCount * sizeof(model_ref_s)
+		+ scanInfo.textureCount * sizeof(texture_s)
+		+ scanInfo.textureReferenceCount * sizeof(texture_ref_s)
+		+ scanInfo.pointLightCount * sizeof(point_light_s)
+		+ scanInfo.spotLightCount * sizeof(spot_light_s)
+		+ scanInfo.directionalLightCount * sizeof(directional_light_s)
 		+ scanInfo.materialReferenceCount * sizeof(uint32_t)
 		+ scanInfo.totalVertexByteCount
 		+ scanInfo.totalIndexByteCount
 		+ totalStringLength;
 
 	uint8_t* memory = (uint8_t*				)AllocateVirtualMemory(ALLOCATOR_IDX_ASSET_DATA, allocator, memorySize);
-	Scene* scene = (Scene*					)memory;
-	scene->models = (Model*					)(scene + 1);
-	scene->meshes = (Mesh*					)(scene->models + scanInfo.modelCount);
-	scene->materials = (Material*			)(scene->meshes + scanInfo.meshCount);
-	scene->vertexBuffers = (Vertexbuffer*	)(scene->materials + scanInfo.materialCount);
-	scene->indexBuffers = (Indexbuffer*		)(scene->vertexBuffers + scanInfo.vertexArrayCount);
-	scene->modelRefs = (Modelref*			)(scene->indexBuffers + scanInfo.indexArrayCount);
-	scene->textures = (Texture*				)(scene->modelRefs + scanInfo.modelReferenceCount);
-	scene->textureRefs = (Textureref*		)(scene->textures + scanInfo.textureCount);
-	scene->pointLights = (Pointlight*		)(scene->textureRefs + scanInfo.textureReferenceCount);
-	scene->spotLights = (Spotlight*			)(scene->pointLights + scanInfo.pointLightCount);
-	scene->directionalLights = (Directionallight*)(scene->spotLights + scanInfo.spotLightCount);
+	scene_s* scene = (scene_s*				)memory;
+	scene->models = (model_s*				)(scene + 1);
+	scene->meshes = (mesh_s*				)(scene->models + scanInfo.modelCount);
+	scene->materials = (material_s*			)(scene->meshes + scanInfo.meshCount);
+	scene->vertexBuffers = (vertex_buffer_s*)(scene->materials + scanInfo.materialCount);
+	scene->indexBuffers = (index_buffer_s*	)(scene->vertexBuffers + scanInfo.vertexArrayCount);
+	scene->modelRefs = (model_ref_s*		)(scene->indexBuffers + scanInfo.indexArrayCount);
+	scene->textures = (texture_s*			)(scene->modelRefs + scanInfo.modelReferenceCount);
+	scene->textureRefs = (texture_ref_s*	)(scene->textures + scanInfo.textureCount);
+	scene->pointLights = (point_light_s*	)(scene->textureRefs + scanInfo.textureReferenceCount);
+	scene->spotLights = (spot_light_s*		)(scene->pointLights + scanInfo.pointLightCount);
+	scene->directionalLights = (directional_light_s*)(scene->spotLights + scanInfo.spotLightCount);
 	scene->materialIndices = (uint32_t*		)(scene->directionalLights + scanInfo.directionalLightCount);
 	scene->vertexData = (uint8_t*			)(scene->materialIndices + scanInfo.materialReferenceCount);
 	scene->indexData = (uint8_t*			)(scene->vertexData + scanInfo.totalVertexByteCount);
@@ -4420,7 +4515,7 @@ uint32_t ConvertAsset_OpenGEX
 		}
 	}
 
-	Scene tempScene = *scene;
+	scene_s tempScene = *scene;
 	tempScene.vertexBufferCount = 0;
 	tempScene.indexBufferCount = 0;
 	tempScene.vertexDataSizeInBytes = 0;
@@ -4441,10 +4536,8 @@ uint32_t ConvertAsset_OpenGEX
 		memcpy(buffer + basePathLength, texturePath, texturePathLength);
 		buffer[pathLength] = '\0';
 
-		LoadAssetStaticManager(assetmanager,buffer, pathLength);
+		LoadAssetStaticManager(buffer, pathLength);
 	}
-
-//	DestroyVirtualMemoryAllocator(ALLOCATOR_IDX_ASSET_DATA, allocator);
 
 	return 0;
 }

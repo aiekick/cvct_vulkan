@@ -4,59 +4,50 @@
 #include "VKTools.h"
 #include "Defines.h"
 #include <glm/glm.hpp>
-#include "MemoryAllocator.h"
 
 class VulkanCore;
 class SwapChain;
 struct Vertices;
 struct Indices;
-struct VKMesh;
+struct vk_mesh_s;
+
+#define DYNAMIC_DESCRIPTOR_SET_COUNT 8192
 
 ////////////////////////////////////////////////////////////////////////////////
 // Descriptorset Layouts
 ////////////////////////////////////////////////////////////////////////////////
 enum StaticDescriptorLayout
 {
-	STATIC_DESCRIPTOR_PERSCENE_BUFFER = 0,
+	STATIC_DESCRIPTOR_BUFFER = 0,
 	STATIC_DESCRIPTOR_SAMPLER,
 	STATIC_DESCRIPTOR_IMAGE,
-	STATIC_DESCRIPTOR_PERMESH_BUFFER,
-	STATIC_DESCRIPTOR_CAMERA_BUFFER,
 	STATIC_DESCRIPTOR_COUNT,
 };
-enum MeshTextureDescriptorLayout
+enum ForwardRendererDescriptorLayout
 {
-	MESHTEXTURE_DESCRIPTOR_DIFFUSE = 0,
-	MESHTEXTURE_DESCRIPTOR_NORMAL,
-	MESHTEXTURE_DESCRIPTOR_OPACITY,
-	MESHTEXTURE_DESCRIPTOR_EMISSION,
-	MESHTEXTURE_DESCRIPTOR_COUNT,
+	FORWARDRENDER_DESCRIPTOR_IMAGE_DIFFUSE,
+	FORWARDRENDER_DESCRIPTOR_IMAGE_NORMAL,
+	FORWARDRENDER_DESCRIPTOR_IMAGE_OPACITY,
+
+	FORWARDRENDER_DESCRIPTOR_COUNT,
 };
 enum VoxelizerDescriptorLayout
 {
-	VOXELIZER_DESCRIPTOR_ALBEDOOPACITY = 0,
-	VOXELIZER_DESCRIPTOR_NORMAL,
-	VOXELIZER_DESCRIPTOR_EMISSION,
-	VOXELIZER_DESCRIPTOR_UBO_GEOM,
-	VOXELIZER_DESCRIPTOR_UBO_FRAG,
-	VOXELIZER_DESCRIPTOR_COUNT,
-};
-enum PostVoxelizerDescriptorLayout
-{
-	POSTVOXELIZER_DESCRIPTOR_VOXELGRID_DIFFUSE = 0,
-	POSTVOXELIZER_DESCRIPTOR_VOXELGRID_NORMAL,
-	POSTVOXELIZER_DESCRIPTOR_VOXELGRID_EMISSION,
-	POSTVOXELIZER_DESCRIPTOR_VOXELGRID_BUFFERPOSITION,
-	POSTVOXELIZER_DESCRIPTOR_BUFFER_SURFACEPOSITION,
-	POSTVOXELIZER_DESCRIPTOR_BUFFER_SURFACECOUNT,
-	POSTVOXELIZER_DESCRIPTOR_BUFFER_DISPATCHINDIRECT,
-	POSTVOXELIZER_DESCRIPTOR_TEXTURE_DIFFUSE,
-	POSTVOXELIZER_DESCRIPTOR_TEXTURE_NORMAL,
-	POSTVOXELIZER_DESCRIPTOR_TEXTURE_EMISSION,
-	POSTVOXELIZER_DESCRIPTOR_TEXTURE_SAMPLER,
-	POSTVOXELIZERDESCRIPTOR_COUNT
-};
+	VOXELIZER_DESCRIPTOR_IMAGE_DIFFUSE = 0,
+	VOXELIZER_DESCRIPTOR_IMAGE_NORMAL,
+	VOXELIZER_DESCRIPTOR_IMAGE_OPACITY,
+	VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT,
+	// Texture 3D
+	VOXELIZER_DESCRIPTOR_IMAGE_VOXELGRID = 0,
+	// Geometry UBO
+	VOXELIZER_DESCRIPTOR_BUFFER_GEOM,
+	// Fragment UBO
+	VOXELIZER_DESCRIPTOR_BUFFER_FRAG,
+	VOXELIZER_DESCRIPTOR_IMAGE_ALPHAVOXELGRID,
+	VOXELIZER_SINGLE_DESCRIPTOR_COUNT,
 
+	VOXELIZER_DESCRIPTOR_COUNT = VOXELIZER_SINGLE_DESCRIPTOR_COUNT + VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT
+};
 enum VoxelizerDebugDescriptorLayout
 {
 	// Geometry UBO
@@ -82,7 +73,13 @@ enum ConeTraceDescriptorLayout
 
 	CONETRACER_DESCRIPTOR_COUNT
 };
+enum PostVoxelizerDescriptorLayout
+{
+	POSTVOXELIZER_DESCRIPTOR_VOXELGRID_DIFFUSE = 0,
+	POSTVOXELIZER_DESCRIPTOR_VOXELGRID_ALPHA,
 
+	POSTVOXELIZERDESCRIPTOR_COUNT
+};
 enum ForwardMainRendererDescriptorLayout
 {
 	// Fragment multiple 
@@ -122,35 +119,37 @@ enum DeferredMainRendererDescriptorLayout
 
 	DEFERRED_MAIN_DESCRIPTOR_COUNT = DEFERRED_MAIN_DESCRIPTOR_MULTIPLE_COUNT + DEFERRED_MAIN_DESCRIPTOR_PASS_COUNT + 1
 };
-enum GridCullingDescriptorLayout
-{
-	GRIDCULLING_DESCRIPTOR_INSTANCE_DATA = 0,
-	GRIDCULLING_DESCRIPTOR_INSTANCE_DRAW,
-	GRIDCULLING_DESCRIPTOR_STATISTICS,
-	GRIDCULLING_DESCRIPTOR_INSTANCE_DRAW2,
-	GRIDCULLING_DESCRIPTOR_DEBUG_DATA,
-
-	GRIDCULLING_DESCRIPTOR_COUNT,
-};
-
-enum DebugDrawRendererDescriptorLayout
-{
-	DEBUGRENDERER_DESCRIPTOR_DEBUGBUFFER = 0,
-
-	DEBUGRENDERER_DESCRIPTOR_COUNT,
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Uniform buffer structures
 ////////////////////////////////////////////////////////////////////////////////
 // Static UBO
-
+struct StaticUBO
+{
+	glm::mat4 modelMatrix;
+	glm::mat4 viewMatrix;
+	glm::mat4 projectionMatrix;
+};
 // Forward renderer uniform buffer structures
 struct ForwardRenderUBO
 {
 	glm::mat4 movel;
 	glm::mat4 view;
 	glm::mat4 projection;
+};
+// Voxelizer uniform buffer structures
+struct VoxelizerUBOGeom
+{
+	glm::mat4 viewProjectionXY;
+	glm::mat4 viewProjectionXZ;
+	glm::mat4 viewProjectionYZ;
+};
+struct VoxelizerUBOFrag
+{
+	glm::vec4 voxelRegionWorld;	// Region of the world
+	uint32_t voxelResolution;	// Resolution of the voxel grid
+	uint32_t cascadeCount;		// Cascade count
+	glm::vec2 padding;
 };
 // Voxelizer debug uniform buffer structures
 struct VoxelizerDebugUBOGeom
@@ -160,10 +159,6 @@ struct VoxelizerDebugUBOGeom
 	uint32_t mipmap;
 	uint32_t side;
 	glm::vec4 voxelRegionWorld;
-};
-struct VoxelizerUBOFrag
-{
-
 };
 // Voxel mip mapper uniform buffer structures
 struct VoxelMipMapperUBOComp
@@ -222,6 +217,15 @@ struct DeferredMainRendererUBOFrag
 	glm::vec3 padding0;
 };
 
+struct UniformData
+{
+	VkBuffer				m_buffer;
+	VkDeviceMemory			m_memory;
+	VkDescriptorBufferInfo	m_descriptor;
+	uint32_t				m_allocSize;
+	BYTE*					m_mapped;
+};
+
 struct RenderState
 {
 	VkPipelineLayout		m_pipelineLayout;
@@ -237,8 +241,8 @@ struct RenderState
 	uint32_t				m_commandBufferCount;
 	VkSemaphore*			m_semaphores;
 	uint32_t				m_semaphoreCount;
-	BufferObject*			m_bufferData;
-	uint32_t				m_bufferDataCount;
+	UniformData*			m_uniformData;
+	uint32_t				m_uniformDataCount;
 	VkDescriptorPool		m_descriptorPool;
 	VkFramebuffer*			m_framebuffers;
 	uint32_t				m_framebufferCount;

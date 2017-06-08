@@ -6,133 +6,134 @@
 struct AnisotropicVoxelTexture;
 class Camera;
 
-//// ImGUI rendrer pipeline state
-//extern void CreateImgGUIPipelineState(
-//	RenderState& renderState,
-//	uint32_t framebufferCount,
-//	VulkanCore* core,
-//	VkCommandPool commandPool,
-//	SwapChain* swapchain);
-// Create Grid culling state
-extern void StateGridCulling(
+// ImGUI rendrer pipeline state
+extern void CreateImgGUIPipelineState(
+	RenderState& renderState,
+	uint32_t framebufferCount,
+	VulkanCore* core,
+	VkCommandPool commandPool,
+	SwapChain* swapchain);
+// Forward renderer pipeline state
+extern void CreateForwardRenderState(
+	RenderState& renderState,
+	VkFramebuffer* framebuffers,
+	uint32_t framebufferCount,
+	VulkanCore* core,
+	VkCommandPool commandPool,
+	SwapChain* swapchain,
+	VkDescriptorSet staticDescriptorSet,
+	Vertices* vertices,
+	vk_mesh_s* meshes,
+	uint32_t meshCount,
+	VkRenderPass renderpass,
+	VkDescriptorSetLayout staticDescLayout);
+// Voxelizer renderer pipeline state
+extern void CreateVoxelizerState(
 	RenderState& renderState,
 	VulkanCore* core,
-	InstanceDataAABB* aabb,
-	uint32_t submeshcount,
-	InstanceStatistic& statistic,
-	VkDrawIndexedIndirectCommand* indirectbuffer,
-	uint32_t debugboxcount);
-// Create Forward Renderer state
-extern void StateForwardRenderer(
+	VkCommandPool commandPool,
+	SwapChain* swapchain,
+	VkDescriptorSet staticDescriptorSet,
+	Vertices* vertices,
+	vk_mesh_s* meshes,
+	uint32_t meshCount,
+	VkDescriptorSetLayout staticDescLayout,
+	Camera* camera,
+	AnisotropicVoxelTexture* avt);
+// Voxel debug renderer pipeline state
+extern void CreateVoxelRenderDebugState(	// Voxel renderer (debugging purposes) pipeline state
 	RenderState& renderState,
+	VkFramebuffer* framebuffers,
+	uint32_t framebufferCount,
 	VulkanCore* core,
+	VkCommandPool commandPool,
+	SwapChain* swapchain,
 	VkDescriptorSet staticDescriptorSet,
 	VkDescriptorSetLayout staticDescLayout,
-	VkDescriptorSetLayout textureDescLayout,
-	VKScene* scenes,
-	uint32_t scenecount);
-// Create debugging renderer state
-extern void StateDebugRenderer(
-	RenderState& renderstate,
-	VulkanCore* core,
-	VkDescriptorSetLayout staticDescLayout,
-	BufferObject& debugbufferobject);
-// Create voxelizer state
-extern void StateVoxelizer(
+	Camera* camera,
+	AnisotropicVoxelTexture* avt);
+// voxel mipmapper pipeline state
+extern void CreateMipMapperState(
 	RenderState& renderState,
 	VulkanCore* core,
-	VkDescriptorSet staticDescriptorSet,
-	VkDescriptorSetLayout staticDescLayout,
-	VkDescriptorSetLayout textureDescLayout,
-	VKScene* scenes,
-	uint32_t scenecount,
-	uint32_t griduniformresolution,
-	VoxelizerGrid* voxelizergrid);
-// Create Post voxelizer state
-extern void StatePostVoxelizer(
+	VkCommandPool commandPool,
+	VkDevice device,
+	SwapChain* swapchain,
+	AnisotropicVoxelTexture* avt
+);
+// Cone trace pipeline state ( screenspace
+extern void CreateConeTraceState(
+	RenderState& renderState,
+	uint32_t framebufferCount,
+	VulkanCore* core,
+	VkCommandPool commandPool,
+	SwapChain* swapchain,
+	AnisotropicVoxelTexture* avts
+);
+// Post voxelizer pipeline state
+extern void CreatePostVoxelizerState(
 	RenderState& renderState,
 	VulkanCore* core,
-	uint32_t uniformGridSize,
-	VoxelizerGrid* voxelgrids,
-	uint32_t voxelgridcount,
-	VoxelGrid* voxelgrid,
-	VkSampler sampler);
-
-// Create the command buffers
-extern void CommandGridCulling(
-	RenderState& renderstate,
+	VkCommandPool commandPool,
+	VkDevice device,
+	SwapChain* swapchain,
+	AnisotropicVoxelTexture* avt
+);
+// Main Renderer pipeline state (Cascaded Voxel Cone Tracing
+extern void CreateForwardMainRendererState(
+	RenderState& renderState,
+	VkFramebuffer* framebuffers,
+	uint32_t framebufferCount,
 	VulkanCore* core,
-	uint32_t meshcount,
-	glm::vec3 gridPosition,
-	glm::vec3 gridSize);
-// Create the forward renderer 
-extern void CommandForwardRenderer(
-	RenderState& renderstate,
-	VulkanCore* core,
-	VKScene* scenes,
-	uint32_t sceneCount,
-	VKMesh* meshes,
-	uint32_t meshCount,
-	VkDescriptorSet staticdescriptorset,
-	VkDescriptorSet* texturedescriptorset);
-// Create indirect forward renderer
-extern void CommandIndirectForwardRender(
-	RenderState& renderstate,
-	VulkanCore* core,
-	VKScene* scenes,
-	uint32_t sceneCount,
-	VKMesh* meshes,
-	uint32_t meshCount,
-	VkDescriptorSet staticdescriptorset,
-	VkDescriptorSet* texturedescriptorset,
-	VkBuffer indirectcommandbuffer);
-// create indirect command debug renderer
-extern void CommandIndirectDebugRenderer(
-	RenderState& renderstate,
-	VulkanCore* core,
+	VkCommandPool commandPool,
+	VkDevice device,
+	SwapChain* swapchain,
 	VkDescriptorSet staticDescriptorSet,
-	VkBuffer indirectcommandbuffer);
-// create indirect command voxelizer
-extern void CommandIndirectVoxelizer(
-	RenderState& renderstate,
-	VulkanCore* core,
-	VKScene* scenes,
-	uint32_t sceneCount,
-	VKMesh* meshes,
+	Vertices* vertices,
+	vk_mesh_s* meshes,
 	uint32_t meshCount,
-	VkDescriptorSet staticdescriptorset,
-	VkDescriptorSet* texturedescriptorset,
-	VkBuffer indirectcommandbuffer);
-// create indirect command post voxelizer
-extern void CommandIndirectPostVoxelizer(
-	RenderState& renderstate,
+	VkRenderPass renderpass,
+	VkDescriptorSetLayout staticDescLayout,
+	AnisotropicVoxelTexture* avts
+);
+// DeferredMainRendererState
+extern void CreateDeferredMainRenderState
+(
+	RenderState& renderState,
+	uint32_t framebufferCount,
 	VulkanCore* core,
-	VoxelGrid* voxelgrid,
-	glm::ivec3 gridresolution,
-	uint32_t cascadenum);
+	VkCommandPool commandPool,
+	SwapChain* swapchain,
+	VkDescriptorSet staticDescriptorSet,
+	Vertices* vertices,
+	vk_mesh_s* meshes,
+	uint32_t meshCount,
+	AnisotropicVoxelTexture* avt,
+	VkDescriptorSetLayout staticDescLayout,
+	float scale
+);
+//Shadow map pipeline state
+/*
+extern void CreateShadowMapState(
+	RenderState& renderState,
+	VkCommandBuffer setupCommandBuffer,
+	VulkanCore* core,
+	VkCommandPool commandPool,
+	VkDevice device,
+	VkFormat depthFormat,
+	VkFormat colorFormat,
+	SwapChain* swapchain,
+	VkDescriptorSet staticDescriptorSet,
+	Vertices* vertices,
+	Indices* indices,
+	vk_mesh_s* meshes,
+	uint32_t meshCount,
+	VkDescriptorSetLayout staticDescLayout,
+	VkCommandBuffer* drawcommandBuffer);			// shadowmap pipeline state
+*/
 
-// Update dynamic uniform buffer object voxelizer
-extern void UpdateDUBOVoxelizer(
-	RenderState& renderstate,
-	VulkanCore& core,
-	glm::vec4 voxelregionworld,
-	glm::ivec3 voxelresolution);
-
-// Pipeline helper functions
 extern void DestroyRenderStates(RenderState& rs, VulkanCore* core, VkCommandPool commandpool);
 extern void DestroyCommandBuffer(RenderState& rs, VulkanCore* core, VkCommandPool commandpool);
 extern void BuildCommandBuffer(RenderState& rs, VkCommandPool commandpool, VulkanCore* core, uint32_t framebufferCount, VkFramebuffer* framebuffers);
-extern void CreateBasicRenderstate(
-	RenderState& rs,
-	VulkanCore* core,
-	uint32_t querycount,
-	uint32_t framebufferCount,
-	uint32_t bufferCount,
-	uint32_t semaphoreCount,
-	bool pipelinecache,
-	uint32_t descriptorlayoutCount,
-	uint32_t descriptorsetCount,
-	uint32_t pipelineCount);
-
 
 #endif //PIPELINESTATES_H

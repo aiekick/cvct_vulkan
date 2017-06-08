@@ -1,5 +1,4 @@
 #include "VulkanCore.h"
-#include "PipelineStates.h"
 
 void DestroyRenderStates(RenderState& rs, VulkanCore* core, VkCommandPool commandpool)
 {
@@ -71,15 +70,15 @@ void DestroyRenderStates(RenderState& rs, VulkanCore* core, VkCommandPool comman
 		rs.m_semaphores = NULL;
 	}
 	// Delete uniform data
-	if (rs.m_bufferData)
+	if (rs.m_uniformData)
 	{
-		for (uint32_t i = 0; i < rs.m_bufferDataCount; i++)
+		for (uint32_t i = 0; i < rs.m_uniformDataCount; i++)
 		{
-			vkDestroyBuffer(device, rs.m_bufferData[i].buffer, NULL);
-			vkFreeMemory(device, rs.m_bufferData[i].memory, NULL);
+			vkDestroyBuffer(device, rs.m_uniformData[i].m_buffer, NULL);
+			vkFreeMemory(device, rs.m_uniformData[i].m_memory, NULL);
 		}
-		free(rs.m_bufferData);
-		rs.m_bufferData = NULL;
+		free(rs.m_uniformData);
+		rs.m_uniformData = NULL;
 	}
 	// Delete the Descriptor Pool
 	if (rs.m_descriptorPool != VK_NULL_HANDLE)
@@ -122,7 +121,7 @@ void DestroyRenderStates(RenderState& rs, VulkanCore* core, VkCommandPool comman
 		free(rs.m_queryResults);
 	}
 	rs.m_framebufferCount = 0;
-	rs.m_bufferDataCount = 0;
+	rs.m_uniformDataCount = 0;
 	rs.m_semaphoreCount = 0;
 	rs.m_commandBufferCount = 0;
 	rs.m_descriptorSetCount = 0;
@@ -152,81 +151,5 @@ void BuildCommandBuffer(RenderState& rs, VkCommandPool commandpool, VulkanCore* 
 	if (rs.m_CreateCommandBufferFunc)
 	{
 		rs.m_CreateCommandBufferFunc(&rs, commandpool, core, framebufferCount, framebuffers, rs.m_cmdBufferParameters);
-	}
-}
-
-void CreateBasicRenderstate(
-	RenderState& rs, 
-	VulkanCore* core, 
-	uint32_t querycount, 
-	uint32_t framebufferCount,
-	uint32_t bufferCount,
-	uint32_t semaphoreCount,
-	bool pipelinecache,
-	uint32_t descriptorlayoutCount,
-	uint32_t descriptorsetCount,
-	uint32_t pipelineCount)
-{
-	VkDevice device = core->GetViewDevice();
-
-	// Create the queries
-	if (!rs.m_queryResults && querycount)
-	{
-		rs.m_queryCount = 4;
-		rs.m_queryResults = (uint64_t*)malloc(sizeof(uint64_t)*rs.m_queryCount);
-		memset(rs.m_queryResults, 0, sizeof(uint64_t)*rs.m_queryCount);
-
-		// Create query pool
-		VkQueryPoolCreateInfo queryPoolInfo = {};
-		queryPoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-		queryPoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		queryPoolInfo.queryCount = rs.m_queryCount;
-		VK_CHECK_RESULT(vkCreateQueryPool(device, &queryPoolInfo, NULL, &rs.m_queryPool));
-	}
-	// Create framebuffers
-	if (!rs.m_framebuffers && framebufferCount)
-	{
-		rs.m_framebufferCount = framebufferCount;
-		rs.m_framebuffers = (VkFramebuffer*)malloc(sizeof(VkFramebuffer)*rs.m_framebufferCount);
-	}
-	// Create a default pipelinecache
-	if (!rs.m_pipelineCache && pipelinecache)
-	{
-		VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
-		pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-		VK_CHECK_RESULT(vkCreatePipelineCache(device, &pipelineCacheCreateInfo, NULL, &rs.m_pipelineCache));
-	}
-	// Create the semaphores
-	if (!rs.m_semaphores && semaphoreCount)
-	{
-		rs.m_semaphoreCount = semaphoreCount;
-		rs.m_semaphores = (VkSemaphore*)malloc(sizeof(VkSemaphore)*rs.m_semaphoreCount);
-		VkSemaphoreCreateInfo semInfo = VKTools::Initializers::SemaphoreCreateInfo();
-		for (uint32_t i = 0; i < rs.m_semaphoreCount; i++)
-			vkCreateSemaphore(core->GetViewDevice(), &semInfo, NULL, &rs.m_semaphores[i]);
-	}
-	// Create the buffers
-	if (!rs.m_bufferData && bufferCount)
-	{
-		rs.m_bufferDataCount = bufferCount;
-		rs.m_bufferData = (BufferObject*)malloc(sizeof(BufferObject)*rs.m_bufferDataCount);
-	}
-	// Create the Descriptor Layouts
-	if (!rs.m_descriptorLayouts && descriptorlayoutCount)
-	{
-		rs.m_descriptorLayoutCount = descriptorlayoutCount;
-		rs.m_descriptorLayouts = (VkDescriptorSetLayout*)malloc(rs.m_descriptorLayoutCount * sizeof(VkDescriptorSetLayout));
-	}
-	// Create the descriptor sets
-	if (!rs.m_descriptorSets && descriptorsetCount)
-	{
-		rs.m_descriptorSetCount = descriptorsetCount;
-		rs.m_descriptorSets = (VkDescriptorSet*)malloc(rs.m_descriptorSetCount * sizeof(VkDescriptorSet));
-	}
-	// Create the pipelines
-	if (!rs.m_pipelines && pipelineCount)
-	{
-		rs.m_pipelineCount = 1;
-		rs.m_pipelines = (VkPipeline*)malloc(rs.m_pipelineCount * sizeof(VkPipeline));
 	}
 }

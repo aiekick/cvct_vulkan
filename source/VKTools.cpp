@@ -2,9 +2,8 @@
 #include <iostream>
 #include <assert.h>
 #include <vector>
-#include "DataTypes.h"
-#include "VulkanCore.h"
 
+#include "VulkanCore.h"
 
 std::string VKTools::ErrorString(VkResult errorCode)
 {
@@ -324,7 +323,7 @@ uint32_t VKTools::CreateBuffer(VulkanCore* core,
 	memAlloc.allocationSize = memReqs.size;
 	memAlloc.memoryTypeIndex = core->GetMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
 	VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, memory));
-	if (data != NULL)
+	if (data != nullptr)
 	{
 		void *mapped;
 		VK_CHECK_RESULT(vkMapMemory(device, *memory, 0, size, 0, &mapped));
@@ -360,28 +359,12 @@ uint32_t VKTools::CreateBuffer(VulkanCore* core,
 	}
 }
 
-uint32_t VKTools::CopyBuffer(VulkanCore* core,
-	VkDevice device,
-	VkCommandPool commandpool,
-	VkQueue queue,
-	VkBuffer src,
-	VkBuffer dst,
-	uint32_t size)
-{
-	VkCommandBuffer copyCmd = VKTools::Initializers::CreateCommandBuffer(commandpool,device,VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-	VkBufferCopy bufferCopy = {};
-	bufferCopy.size = size;
-	vkCmdCopyBuffer(copyCmd, src, dst, 1, &bufferCopy);
-	VKTools::FlushCommandBuffer(copyCmd, queue, device, commandpool, true);
-	return 0;
-}
-
 void VKTools::CreateAttachment(
 	VkDevice device,
 	VulkanCore* core,
 	VkFormat format,
 	VkImageUsageFlagBits usage,
-	FrameBufferAttachment* attachment,
+	FrameBufferAttachment *attachment,
 	uint32_t width,
 	uint32_t height)
 {
@@ -442,7 +425,7 @@ void VKTools::CreateAttachment(
 void VKTools::CreateImage(
 	VulkanCore* core,
 	VkFormat format,
-	FrameBufferAttachment* attachment,
+	FrameBufferAttachment *attachment,
 	uint32_t width,
 	uint32_t height)
 {
@@ -489,25 +472,6 @@ void VKTools::CreateImage(
 	imageView.image = attachment->image;
 	VK_CHECK_RESULT(vkCreateImageView(core->GetViewDevice(), &imageView, nullptr, &attachment->view));
 }
-
-uint32_t VKTools::GetMemoryType(VulkanCore* core, uint32_t typeBits, VkFlags properties)
-{
-	for (uint32_t i = 0; i < 32; i++)
-	{
-		if ((typeBits & 1) == 1)
-		{
-			if ((core->GetDeviceInformation().deviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)
-			{
-				return i;
-			}
-		}
-		typeBits >>= 1;
-	}
-
-	RETURN_ERROR(-1, "Memory type is not active in the properties (0x%08X)", (uint32_t)0);
-	return 0;
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Vulkan tools initializers
@@ -821,16 +785,7 @@ VkWriteDescriptorSet VKTools::Initializers::WriteDescriptorSet(
 	writeDescriptorSet.descriptorType = type;
 	writeDescriptorSet.dstBinding = binding;
 	writeDescriptorSet.pImageInfo = imageInfo;
-	writeDescriptorSet.dstArrayElement = 0;
 	// Default value in all examples
 	writeDescriptorSet.descriptorCount = 1;
 	return writeDescriptorSet;
-}
-
-VkBufferMemoryBarrier VKTools::Initializers::BufferMemoryBarrier()
-{
-	VkBufferMemoryBarrier bufferMemoryBarrier = {};
-	bufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	bufferMemoryBarrier.pNext = NULL;
-	return bufferMemoryBarrier;
 }

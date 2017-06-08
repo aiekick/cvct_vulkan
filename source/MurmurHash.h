@@ -29,7 +29,7 @@ FORCE_INLINE uint64_t fmix64(uint64_t k)
 }
 
 // 32-bit Wang integer hash: http://www.concentric.net/~Ttwang/tech/inthash.htm
-inline uint32_t  Hash32Shift(uint32_t key)
+uint32_t  Hash32Shift(uint32_t key)
 {
 	key = ~key + (key << 15); // key = (key << 15) - key - 1;
 	key = key ^ (key >> 12);
@@ -41,7 +41,7 @@ inline uint32_t  Hash32Shift(uint32_t key)
 }
 
 // 64-bit Wang integer hash: http://www.concentric.net/~Ttwang/tech/inthash.htm
-inline uint64_t Hash64Shift(uint64_t key)
+uint64_t Hash64Shift(uint64_t key)
 {
 	key = (~key) + (key << 21); // key = (key << 21) - key - 1;
 	key = key ^ (key >> 24);
@@ -53,7 +53,7 @@ inline uint64_t Hash64Shift(uint64_t key)
 	return key;
 }
 
-inline void MurmurHash3_x64_128(const void * key, const int len,
+void MurmurHash3_x64_128(const void * key, const int len,
 	const uint32_t seed, void * out)
 {
 	const uint8_t * data = (const uint8_t*)key;
