@@ -8,48 +8,102 @@
 #include "DataTypes.h"
 #include "AnisotropicVoxelTexture.h"
 #include "Camera.h"
+#include "Defines.h"
 
-struct PushConstantFrag
+#define AXISSCALAR 2
+
+// order axis: YZ(x), XZ(y), XY(z)
+
+uint32_t uniformgridresolution = {};
+
+struct UBOGeom
 {
-	uint32_t cascadeNum;		// The current cascade
+	glm::mat4 viewprojectionAxis;
+	BYTE padding0[192];
 };
 
-struct Parameter
+struct UBOFrag
 {
-	AnisotropicVoxelTexture* avt;
-	VkDescriptorSet staticDescriptorSet;
-	vk_mesh_s* meshes;
-	uint32_t meshCount;
+	glm::vec4 voxelregionworld;					// xyz = position, w = size
+	glm::ivec3 voxelresolution;	float padding0;	// resolution of the voxel grid
+	BYTE padding1[224];
 };
 
-void BuildCommandBufferVoxelizerState(
-	RenderState* renderstate,
-	VkCommandPool commandpool,
+void UpdateDUBOVoxelizer(
+	RenderState& renderstate,
+	VulkanCore& core,
+	glm::vec4 voxelregionworld,
+	glm::ivec3 voxelresolution)
+{
+	VkDevice device = core.GetViewDevice();
+	////////////////////////////////////////////////////////////////////////////////
+	// Update the descriptorsets for the voxel textures
+	////////////////////////////////////////////////////////////////////////////////
+	glm::mat4 correction;
+	correction[1][1] = -1;
+	correction[2][2] = 0.5;
+	correction[3][2] = 0.5;
+
+	glm::ivec3 scalar[AXISCOUNT] =
+	{
+		glm::ivec3(1,AXISSCALAR,AXISSCALAR),
+		glm::ivec3(AXISSCALAR,1,AXISSCALAR),
+		glm::ivec3(AXISSCALAR,AXISSCALAR,1)
+	};
+
+	float worldSize = voxelregionworld.w;
+	float halfSize = worldSize / 2.0f;
+
+	glm::vec3 bMin = glm::vec3(voxelregionworld);
+	glm::vec3 bMax = bMin + worldSize;
+	glm::vec3 bMid = (bMin + bMax) / 2.0f;
+	glm::mat4 orthoProjection = glm::ortho(-halfSize, halfSize, -halfSize, halfSize, 0.0f, worldSize);
+
+	glm::mat4 ViewAxis[3] =
+	{
+		(correction * orthoProjection) * glm::lookAt(glm::vec3(bMin.x, bMid.y, bMid.z), glm::vec3(bMax.x, bMid.y, bMid.z), glm::vec3(0, 0, 1)),
+		(correction * orthoProjection) * glm::lookAt(glm::vec3(bMid.x, bMin.y, bMid.z), glm::vec3(bMid.x, bMax.y, bMid.z), glm::vec3(1, 0, 0)),
+		(correction * orthoProjection) * glm::lookAt(glm::vec3(bMid.x, bMid.y, bMin.z), glm::vec3(bMid.x, bMid.y, bMax.z), glm::vec3(0, 1, 0))
+	};
+
+	UBOGeom ubogeom[AXISCOUNT];
+	UBOFrag ubofrag[AXISCOUNT];
+	for (uint32_t i = 0; i < AXISCOUNT; i++)
+	{
+		ubogeom[i].viewprojectionAxis = ViewAxis[i];
+		ubofrag[i].voxelregionworld = voxelregionworld;
+		ubofrag[i].voxelresolution = voxelresolution * scalar[i];
+	}
+
+	uint8_t *pData;
+	// Update geoemtry UBO
+	VK_CHECK_RESULT(vkMapMemory(device, renderstate.m_bufferData[0].memory, 0, sizeof(UBOGeom) * AXISCOUNT, 0, (void**)&pData));
+	memcpy(pData, &ubogeom, sizeof(UBOGeom) * AXISCOUNT);
+	vkUnmapMemory(device, renderstate.m_bufferData[0].memory);
+	// Update fragment UBO
+	VK_CHECK_RESULT(vkMapMemory(device, renderstate.m_bufferData[1].memory, 0, sizeof(UBOFrag) * AXISCOUNT, 0, (void**)&pData));
+	memcpy(pData, &ubofrag, sizeof(UBOFrag) * AXISCOUNT);
+	vkUnmapMemory(device, renderstate.m_bufferData[1].memory);
+	pData = NULL;
+}
+
+void CommandIndirectVoxelizer(
+	RenderState& renderstate,
 	VulkanCore* core,
-	uint32_t framebufferCount,
-	VkFramebuffer* framebuffers,
-	BYTE* parameters)
+	VKScene* scenes,
+	uint32_t sceneCount,
+	VKMesh* meshes,
+	uint32_t meshCount,
+	VkDescriptorSet staticdescriptorset,
+	VkDescriptorSet* texturedescriptorset,
+	VkBuffer indirectcommandbuffer)
 {
-	uint32_t width = core->GetSwapChain()->m_width;
-	uint32_t height = core->GetSwapChain()->m_height;
-	RenderState* renderState = renderstate;
+	RenderState& renderState = renderstate;
+	uint32_t width = uniformgridresolution * AXISSCALAR;
+	uint32_t height = uniformgridresolution * AXISSCALAR;
 	VkDevice device = core->GetViewDevice();
-
-	////////////////////////////////////////////////////////////////////////////////
-	// Rebuild the parameters
-	////////////////////////////////////////////////////////////////////////////////
-	AnisotropicVoxelTexture* avt = ((Parameter*)parameters)->avt;
-	VkDescriptorSet staticDescriptorSet = ((Parameter*)parameters)->staticDescriptorSet;
-	vk_mesh_s* meshes = ((Parameter*)parameters)->meshes;
-	uint32_t meshCount = ((Parameter*)parameters)->meshCount;
-
-	////////////////////////////////////////////////////////////////////////////////
-	// Rebuild the command buffers
-	////////////////////////////////////////////////////////////////////////////////
-	renderState->m_commandBufferCount = avt->m_cascadeCount;
-	renderState->m_commandBuffers = (VkCommandBuffer*)malloc(sizeof(VkCommandBuffer)*renderState->m_commandBufferCount);
-	for (uint32_t i = 0; i < renderState->m_commandBufferCount; i++)
-		renderState->m_commandBuffers[i] = VKTools::Initializers::CreateCommandBuffer(commandpool, device, VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+	VkRenderPass renderpass = renderstate.m_renderpass;
+	VkFramebuffer framebuffer = renderstate.m_framebuffers[0];
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Record command buffer
@@ -61,532 +115,379 @@ void BuildCommandBufferVoxelizerState(
 	VkRenderPassBeginInfo renderPassBeginInfo = {};
 	renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	renderPassBeginInfo.pNext = NULL;
-	renderPassBeginInfo.renderPass = renderState->m_renderpass;
+	renderPassBeginInfo.renderPass = renderpass;
 	renderPassBeginInfo.renderArea.offset.x = 0;
 	renderPassBeginInfo.renderArea.offset.y = 0;
-	renderPassBeginInfo.renderArea.extent.width = avt->m_width;
-	renderPassBeginInfo.renderArea.extent.height = avt->m_height;
+	renderPassBeginInfo.renderArea.extent.width = width;
+	renderPassBeginInfo.renderArea.extent.height = height;
 	renderPassBeginInfo.clearValueCount = 0;
 	renderPassBeginInfo.pClearValues = NULL;
 
-	renderPassBeginInfo.framebuffer = renderState->m_framebuffers[0];
-	uint32_t d = 0;
-	for (uint32_t i = 0; i < renderState->m_commandBufferCount; i++)
+	for (uint32_t i = 0; i < AXISCOUNT; i++)
 	{
-		VK_CHECK_RESULT(vkBeginCommandBuffer(renderState->m_commandBuffers[i], &cmdBufInfo));
-		
-		// Write timestamp
-		vkCmdResetQueryPool(renderState->m_commandBuffers[i], renderState->m_queryPool, 0, 4);
-		vkCmdWriteTimestamp(renderState->m_commandBuffers[i], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, renderState->m_queryPool, 0);
-		vkCmdBeginRenderPass(renderState->m_commandBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		// Set target frame buffer
+		renderPassBeginInfo.framebuffer = framebuffer;
+
+		//begin
+		VK_CHECK_RESULT(vkBeginCommandBuffer(renderState.m_commandBuffers[i], &cmdBufInfo));
+
+		vkCmdResetQueryPool(renderState.m_commandBuffers[i], renderState.m_queryPool, 0, 4);
+		vkCmdWriteTimestamp(renderState.m_commandBuffers[i], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, renderState.m_queryPool, 0);
+
+		// Start the first sub pass specified in our default render pass setup by the base class
+		// This will clear the color and depth attachment
+		vkCmdBeginRenderPass(renderState.m_commandBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 		// Update dynamic viewport state
 		VkViewport viewport = {};
-		viewport.width = (float)avt->m_width;
-		viewport.height = (float)avt->m_height;
+		viewport.width = (float)width;
+		viewport.height = (float)height;
 		viewport.minDepth = (float) 0.0f;
 		viewport.maxDepth = (float) 1.0f;
-		vkCmdSetViewport(renderState->m_commandBuffers[i], 0, 1, &viewport);
+		vkCmdSetViewport(renderState.m_commandBuffers[i], 0, 1, &viewport);
 
 		// Update dynamic scissor state
-		VkRect2D scissor = {};
-		scissor.extent.width = avt->m_width;
-		scissor.extent.height = avt->m_height;
+		VkRect2D scissor = {}; 
+		scissor.extent.width = width;
+		scissor.extent.height = height;
 		scissor.offset.x = 0;
 		scissor.offset.y = 0;
-		vkCmdSetScissor(renderState->m_commandBuffers[i], 0, 1, &scissor);
-
-		// Submit push constant
-		PushConstantFrag pc;
-		pc.cascadeNum = i;
-		vkCmdPushConstants(renderState->m_commandBuffers[i], renderState->m_pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantFrag), &pc);
+		vkCmdSetScissor(renderState.m_commandBuffers[i], 0, 1, &scissor);
 
 		// Bind the rendering pipeline (including the shaders)
-		vkCmdBindPipeline(renderState->m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState->m_pipelines[0]);
-
+		vkCmdBindPipeline(renderState.m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState.m_pipelines[0]);
+		uint32_t dynamicoffset2[2];
+		dynamicoffset2[0] = i * sizeof(UBOGeom);
+		dynamicoffset2[1] = i * sizeof(UBOFrag);
+		vkCmdBindDescriptorSets(renderState.m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState.m_pipelineLayout, 2, 1, &renderstate.m_descriptorSets[i], 2, dynamicoffset2);
+		uint32_t dynamicoffset0[2];
 		// Bind descriptor sets describing shader binding points
-		uint32_t doffset = 0;
-		vkCmdBindDescriptorSets(renderState->m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState->m_pipelineLayout, 0, 1, &staticDescriptorSet, 1, &doffset);
-		vkCmdBindDescriptorSets(renderState->m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState->m_pipelineLayout, 2, 1, &renderState->m_descriptorSets[0], 0, NULL);
-
-		for (uint32_t m = 0; m < meshCount; m++)
+		uint32_t submeshoffset = 0;
+		uint32_t meshoffset = 0;
+		for (uint32_t s = 0; s < sceneCount; s++)
 		{
-			//select the current mesh
-			vk_mesh_s* mesh = &meshes[m];
-			//bind vertexbuffer per mesh
-			vkCmdBindVertexBuffers(renderState->m_commandBuffers[i], 0, mesh->vbvCount, mesh->vertexResources, mesh->vertexOffsets);
-			for (uint32_t j = 0; j < mesh->submeshCount; j++)
-			{
-				//TODO: BIND new descriptorset. This looks wrong. fix...
-				uint32_t setnum = (d++) + 1;
-				VkDescriptorSet descriptorset = renderState->m_descriptorSets[setnum];
+			VKScene* scene = &scenes[s];
+			dynamicoffset0[0] = s * sizeof(PerSceneUBO);
 
-				//bind the textures to the correct format
-				//format: stype,pnext,scSet,srcBinding,srcArrayelement,dstSet,dstbinding,dstarrayelement,descriptorcount
-				VkCopyDescriptorSet textureDescriptorSets[TextureIndex::TEXTURE_NUM];
-				//diffuse texture
-				VkCopyDescriptorSet diffuse;
-				diffuse.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-				diffuse.pNext = NULL;
-				diffuse.srcSet = staticDescriptorSet;
-				diffuse.srcBinding = STATIC_DESCRIPTOR_IMAGE;
-				diffuse.srcArrayElement = mesh->submeshes[j].textureIndex[DIFFUSE_TEXTURE];
-				diffuse.dstSet = descriptorset;
-				diffuse.dstBinding = VOXELIZER_DESCRIPTOR_IMAGE_DIFFUSE;
-				diffuse.dstArrayElement = 0;
-				diffuse.descriptorCount = 1;
-				textureDescriptorSets[DIFFUSE_TEXTURE] = diffuse;
-				//normal texture
-				VkCopyDescriptorSet normal;
-				normal.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-				normal.pNext = NULL;
-				normal.srcSet = staticDescriptorSet;
-				normal.srcBinding = STATIC_DESCRIPTOR_IMAGE;
-				normal.srcArrayElement = mesh->submeshes[j].textureIndex[NORMAL_TEXTURE];
-				normal.dstSet = descriptorset;
-				normal.dstBinding = VOXELIZER_DESCRIPTOR_IMAGE_NORMAL;
-				normal.dstArrayElement = 0;
-				normal.descriptorCount = 1;
-				textureDescriptorSets[NORMAL_TEXTURE] = normal;
-				//opacity teture
-				VkCopyDescriptorSet opacity;
-				opacity.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-				opacity.pNext = NULL;
-				opacity.srcSet = staticDescriptorSet;
-				opacity.srcBinding = STATIC_DESCRIPTOR_IMAGE;
-				opacity.srcArrayElement = (uint32_t)mesh->submeshes[j].textureIndex[OPACITY_TEXTURE];
-				opacity.dstSet = descriptorset;
-				opacity.dstBinding = VOXELIZER_DESCRIPTOR_IMAGE_OPACITY;
-				opacity.dstArrayElement = 0;
-				opacity.descriptorCount = 1;
-				textureDescriptorSets[OPACITY_TEXTURE] = opacity;
-				//update the descriptors
-				vkUpdateDescriptorSets(device, 0, NULL, (uint32_t)TEXTURE_NUM, textureDescriptorSets);
-				// Bind descriptor sets describing shader binding points
-				vkCmdBindDescriptorSets(renderState->m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState->m_pipelineLayout, 1, 1, &descriptorset, 0, NULL);
-				// Bind triangle indices
-				vkCmdBindIndexBuffer(renderState->m_commandBuffers[i], mesh->submeshes[j].ibv.buffer, mesh->submeshes[j].ibv.offset, mesh->submeshes[j].ibv.format);
-				// Draw indexed triangle
-				vkCmdDrawIndexed(renderState->m_commandBuffers[i], (uint32_t)mesh->submeshes[j].ibv.count, 1, 0, 0, 0);
+			for (uint32_t m = 0; m < scene->vkmeshCount; m++)
+			{
+				VKMesh* mesh = &meshes[meshoffset + m];
+				vkCmdBindVertexBuffers(renderState.m_commandBuffers[i], 0, mesh->vbvCount, mesh->vertexResources, mesh->vertexOffsets);
+
+				for (uint32_t sm = 0; sm < mesh->submeshCount; sm++)
+				{
+					dynamicoffset0[1] = (submeshoffset + sm) * sizeof(PerSubMeshUBO);
+					vkCmdBindDescriptorSets(renderState.m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState.m_pipelineLayout, 0, 1, &staticdescriptorset, 2, dynamicoffset0);
+					// quick fix
+					if (mesh->submeshes[sm].textureIndex[0] != INVALID_TEXTURE)
+						vkCmdBindDescriptorSets(renderState.m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState.m_pipelineLayout, 1, 1, &texturedescriptorset[submeshoffset + sm], 0, NULL);
+					// Bind triangle indices
+					vkCmdBindIndexBuffer(renderState.m_commandBuffers[i], mesh->submeshes[sm].ibv.buffer, mesh->submeshes[sm].ibv.offset, mesh->submeshes[sm].ibv.format);
+					// Draw indexed triangle
+					vkCmdDrawIndexedIndirect(renderState.m_commandBuffers[i], indirectcommandbuffer, (submeshoffset + sm) * sizeof(VkDrawIndexedIndirectCommand), 1, sizeof(VkDrawIndexedIndirectCommand));
+				}
+				// Set offset per submesh
+				submeshoffset += mesh->submeshCount;
 			}
+			// Set offset per mesh
+			meshoffset += scene->vkmeshCount;
 		}
 
-		vkCmdWriteTimestamp(renderState->m_commandBuffers[i], VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, renderState->m_queryPool, 1);
-
-		//end
-		vkCmdEndRenderPass(renderState->m_commandBuffers[i]);
-		VK_CHECK_RESULT(vkEndCommandBuffer(renderState->m_commandBuffers[i]));
+		// Write timestamp
+		vkCmdWriteTimestamp(renderState.m_commandBuffers[i], VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, renderState.m_queryPool, 1);
+		// End renderpass
+		vkCmdEndRenderPass(renderState.m_commandBuffers[i]);
+		// End commandbuffer
+		VK_CHECK_RESULT(vkEndCommandBuffer(renderState.m_commandBuffers[i]));
 	}
 }
 
-void CreateVoxelizerState(
+void StateVoxelizer(
 	RenderState& renderState,
 	VulkanCore* core,
-	VkCommandPool commandPool,
-	SwapChain* swapchain,
 	VkDescriptorSet staticDescriptorSet,
-	Vertices* vertices,
-	vk_mesh_s* meshes,
-	uint32_t meshCount,
 	VkDescriptorSetLayout staticDescLayout,
-	Camera* camera,
-	AnisotropicVoxelTexture* avt)
+	VkDescriptorSetLayout textureDescLayout,
+	VKScene* scenes,
+	uint32_t scenecount,
+	uint32_t griduniformresolution,
+	VoxelizerGrid* voxelizergrid)
 {
+	VkDevice device = core->GetViewDevice();
+	SwapChain* swapchain = core->GetSwapChain();
 	uint32_t width = swapchain->m_width;
 	uint32_t height = swapchain->m_height;
-	VkDevice device = core->GetViewDevice();
+	uniformgridresolution = griduniformresolution;
 
-	////////////////////////////////////////////////////////////////////////////////
-	// Create queries
-	////////////////////////////////////////////////////////////////////////////////
-	renderState.m_queryCount = 4;
-	renderState.m_queryResults = (uint64_t*)malloc(sizeof(uint64_t)*renderState.m_queryCount);
-	memset(renderState.m_queryResults, 0, sizeof(uint64_t)*renderState.m_queryCount);
-	// Create query pool
-	VkQueryPoolCreateInfo queryPoolInfo = {};
-	queryPoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-	queryPoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-	queryPoolInfo.queryCount = renderState.m_queryCount;
-	VK_CHECK_RESULT(vkCreateQueryPool(device, &queryPoolInfo, NULL, &renderState.m_queryPool));
-
-	///////////////////////////////////////////////////////////////////////////////
-	// Create the pipelineCache
-	////////////////////////////////////////////////////////////////////////////////
-	if (renderState.m_pipelineCache == VK_NULL_HANDLE)
-	{
-		// create a default pipelinecache
-		VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
-		pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-		VK_CHECK_RESULT(vkCreatePipelineCache(device, &pipelineCacheCreateInfo, NULL, &renderState.m_pipelineCache));
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-	// Create semaphores
-	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_semaphores)
-	{
-		renderState.m_semaphoreCount = avt->m_cascadeCount;
-		renderState.m_semaphores = (VkSemaphore*)malloc(sizeof(VkSemaphore)*renderState.m_semaphoreCount);
-		VkSemaphoreCreateInfo semInfo = VKTools::Initializers::SemaphoreCreateInfo();
-		for (uint32_t i = 0; i < renderState.m_semaphoreCount; i++)
-			vkCreateSemaphore(device, &semInfo, NULL, &renderState.m_semaphores[i]);
-	}
-
+	CreateBasicRenderstate(renderState, core, 4, 1, 2, AXISCOUNT, true, 1, AXISCOUNT, 1);
+	
 	////////////////////////////////////////////////////////////////////////////////
 	//create the renderpass
 	////////////////////////////////////////////////////////////////////////////////
-	if (renderState.m_renderpass == VK_NULL_HANDLE)
-	{
-		VkAttachmentDescription attachments = {};
-		VkAttachmentReference depthReference = {};
-		depthReference.attachment = 0;
-		depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-		VkSubpassDescription subpass = {};
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.flags = 0;
-		subpass.inputAttachmentCount = 0;
-		subpass.pInputAttachments = NULL;
-		subpass.colorAttachmentCount = 0;
-		subpass.pColorAttachments = NULL;
-		subpass.pResolveAttachments = NULL;
-		subpass.pDepthStencilAttachment = NULL;
-		subpass.preserveAttachmentCount = 0;
-		subpass.pPreserveAttachments = NULL;
-
-		VkRenderPassCreateInfo renderPassInfo = {};
-		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		renderPassInfo.pNext = NULL;
-		renderPassInfo.attachmentCount = 0;
-		renderPassInfo.pAttachments = NULL;
-		renderPassInfo.subpassCount = 1;
-		renderPassInfo.pSubpasses = &subpass;
-		renderPassInfo.dependencyCount = 0;
-		renderPassInfo.pDependencies = NULL;
-
-		VK_CHECK_RESULT(vkCreateRenderPass(device, &renderPassInfo, NULL, &renderState.m_renderpass));
-	}
+	VkAttachmentDescription attachments = {};
+	VkAttachmentReference depthReference = {};
+	depthReference.attachment = 0;
+	depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	VkSubpassDescription subpass[1] = {};
+	subpass[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass[0].flags = 0;
+	subpass[0].inputAttachmentCount = 0;
+	subpass[0].pInputAttachments = NULL;
+	subpass[0].colorAttachmentCount = 0;
+	subpass[0].pColorAttachments = NULL;
+	subpass[0].pResolveAttachments = NULL;
+	subpass[0].pDepthStencilAttachment = NULL;
+	subpass[0].preserveAttachmentCount = 0;
+	subpass[0].pPreserveAttachments = NULL;
+	VkRenderPassCreateInfo renderPassInfo = {};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassInfo.pNext = NULL;
+	renderPassInfo.attachmentCount = 0;
+	renderPassInfo.pAttachments = NULL;
+	renderPassInfo.subpassCount = 1;
+	renderPassInfo.pSubpasses = subpass;
+	renderPassInfo.dependencyCount = 0;
+	renderPassInfo.pDependencies = NULL;
+	VK_CHECK_RESULT(vkCreateRenderPass(device, &renderPassInfo, NULL, &renderState.m_renderpass));
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Create the framebuffers
 	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_framebuffers)
-	{
-		renderState.m_framebufferCount = 1;
-		renderState.m_framebuffers = (VkFramebuffer*)malloc(sizeof(VkFramebuffer) * renderState.m_framebufferCount);
-		//setup create info for framebuffers
-		VkFramebufferCreateInfo frameBufferCreateInfo = {};
-		frameBufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-		frameBufferCreateInfo.pNext = NULL;
-		frameBufferCreateInfo.renderPass = renderState.m_renderpass;
-		frameBufferCreateInfo.attachmentCount = 0;
-		frameBufferCreateInfo.pAttachments = NULL;
-		frameBufferCreateInfo.width = avt->m_width;
-		frameBufferCreateInfo.height = avt->m_height;
-		frameBufferCreateInfo.layers = 1;
-		VK_CHECK_RESULT(vkCreateFramebuffer(device, &frameBufferCreateInfo, NULL, &renderState.m_framebuffers[0]));
-	}
-	
-	////////////////////////////////////////////////////////////////////////////////
-	// Create the Uniform Data
-	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_uniformData)
-	{
-		renderState.m_uniformDataCount = 2;
-		renderState.m_uniformData = (UniformData*)malloc(sizeof(UniformData)*renderState.m_uniformDataCount);
-
-		VKTools::CreateBuffer(core, device,
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			sizeof(VoxelizerUBOGeom),
-			NULL,
-			&renderState.m_uniformData[0].m_buffer,
-			&renderState.m_uniformData[0].m_memory,
-			&renderState.m_uniformData[0].m_descriptor);
-
-		VKTools::CreateBuffer(core, device,
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			sizeof(VoxelizerUBOFrag),
-			NULL,
-			&renderState.m_uniformData[1].m_buffer,
-			&renderState.m_uniformData[1].m_memory,
-			&renderState.m_uniformData[1].m_descriptor);
-	}
+	//setup create info for framebuffers
+	VkFramebufferCreateInfo frameBufferCreateInfo = {};
+	frameBufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	frameBufferCreateInfo.pNext = NULL;
+	frameBufferCreateInfo.renderPass = renderState.m_renderpass;
+	frameBufferCreateInfo.attachmentCount = 0;
+	frameBufferCreateInfo.pAttachments = NULL;
+	frameBufferCreateInfo.width = griduniformresolution * AXISSCALAR;
+	frameBufferCreateInfo.height = griduniformresolution * AXISSCALAR;
+	frameBufferCreateInfo.layers = 1;
+	VK_CHECK_RESULT(vkCreateFramebuffer(device, &frameBufferCreateInfo, NULL, &renderState.m_framebuffers[0]));
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Set the descriptorset layout
 	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_descriptorLayouts)
-	{
-		renderState.m_descriptorLayoutCount = 2;
-		renderState.m_descriptorLayouts = (VkDescriptorSetLayout*)malloc(renderState.m_descriptorLayoutCount * sizeof(VkDescriptorSetLayout));
-		// Dynamic descriptorset
-		VkDescriptorSetLayoutBinding layoutbinding0[VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT];
-		VkDescriptorSetLayoutBinding layoutbinding1[VOXELIZER_SINGLE_DESCRIPTOR_COUNT];
-		// Binding 0 : Diffuse texture sampled image
-		layoutbinding0[VOXELIZER_DESCRIPTOR_IMAGE_DIFFUSE] =
-		{ VOXELIZER_DESCRIPTOR_IMAGE_DIFFUSE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-		// Binding 1 : Normal texture sampled image
-		layoutbinding0[VOXELIZER_DESCRIPTOR_IMAGE_NORMAL] =
-		{ VOXELIZER_DESCRIPTOR_IMAGE_NORMAL, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-		// Binding 2: Opacity texture sampled image
-		layoutbinding0[VOXELIZER_DESCRIPTOR_IMAGE_OPACITY] =
-		{ VOXELIZER_DESCRIPTOR_IMAGE_OPACITY, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-		// Binding 3: 3D voxel textures
-		layoutbinding1[VOXELIZER_DESCRIPTOR_IMAGE_VOXELGRID] =
-		{ VOXELIZER_DESCRIPTOR_IMAGE_VOXELGRID, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-		// Binding 4: Geometry uniform buffer
-		layoutbinding1[VOXELIZER_DESCRIPTOR_BUFFER_GEOM] =
-		{ VOXELIZER_DESCRIPTOR_BUFFER_GEOM , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1, VK_SHADER_STAGE_GEOMETRY_BIT, NULL };
-		// Binding 5: Fragment uniform buffer
-		layoutbinding1[VOXELIZER_DESCRIPTOR_BUFFER_FRAG] =
-		{ VOXELIZER_DESCRIPTOR_BUFFER_FRAG , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-		// Binding 6: 3D voxel textures
-		layoutbinding1[VOXELIZER_DESCRIPTOR_IMAGE_ALPHAVOXELGRID] =
-		{ VOXELIZER_DESCRIPTOR_IMAGE_ALPHAVOXELGRID, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-		// Create the descriptorlayout0
-		VkDescriptorSetLayoutCreateInfo descriptorLayout0 = VKTools::Initializers::DescriptorSetLayoutCreateInfo(0, VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT, layoutbinding0);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout0, NULL, &renderState.m_descriptorLayouts[0]));
-		// Create the descriptorlayout1
-		VkDescriptorSetLayoutCreateInfo descriptorLayout1 = VKTools::Initializers::DescriptorSetLayoutCreateInfo(0, VOXELIZER_SINGLE_DESCRIPTOR_COUNT, layoutbinding1);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout1, NULL, &renderState.m_descriptorLayouts[1]));
-	}
+	// Dynamic descriptorset
+	VkDescriptorSetLayoutBinding layoutbinding0[VOXELIZER_DESCRIPTOR_COUNT];
+	// Binding 0 : Diffuse texture sampled image
+	layoutbinding0[VOXELIZER_DESCRIPTOR_ALBEDOOPACITY] =
+	{ VOXELIZER_DESCRIPTOR_ALBEDOOPACITY, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
+	// Binding 1 : Normal texture sampled image
+	layoutbinding0[VOXELIZER_DESCRIPTOR_NORMAL] =
+	{ VOXELIZER_DESCRIPTOR_NORMAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
+	// Binding 2: Opacity texture sampled image
+	layoutbinding0[VOXELIZER_DESCRIPTOR_EMISSION] =
+	{ VOXELIZER_DESCRIPTOR_EMISSION, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
+	// Binding 3: UBO Geometry
+	layoutbinding0[VOXELIZER_DESCRIPTOR_UBO_GEOM] =
+	{ VOXELIZER_DESCRIPTOR_UBO_GEOM, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_GEOMETRY_BIT, NULL };
+	// Binding 4: UBO Fragment
+	layoutbinding0[VOXELIZER_DESCRIPTOR_UBO_FRAG] =
+	{ VOXELIZER_DESCRIPTOR_UBO_FRAG, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
+	
+	VkDescriptorSetLayoutCreateInfo descriptorLayout0 = VKTools::Initializers::DescriptorSetLayoutCreateInfo(0, VOXELIZER_DESCRIPTOR_COUNT, layoutbinding0);
+	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout0, NULL, &renderState.m_descriptorLayouts[0]));
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Create pipeline layout
 	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_pipelineLayout)
-	{
-		VkDescriptorSetLayout dLayouts[] = { staticDescLayout, renderState.m_descriptorLayouts[0],renderState.m_descriptorLayouts[1] };
-		VkPushConstantRange pushConstantRange = VKTools::Initializers::PushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantFrag));
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = VKTools::Initializers::PipelineLayoutCreateInfo(0, 3, dLayouts);
-		pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-		pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &renderState.m_pipelineLayout));
-	}
+	VkDescriptorSetLayout layouts[3] = { staticDescLayout, textureDescLayout, renderState.m_descriptorLayouts[0]};
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = VKTools::Initializers::PipelineLayoutCreateInfo(0, 3, layouts);
+	VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &renderState.m_pipelineLayout));
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Create descriptor pool
 	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_descriptorPool)
-	{
-		VkDescriptorPoolSize poolSize[VOXELIZER_DESCRIPTOR_COUNT];
-		poolSize[VOXELIZER_DESCRIPTOR_IMAGE_DIFFUSE] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , avt->m_cascadeCount * DYNAMIC_DESCRIPTOR_SET_COUNT };
-		poolSize[VOXELIZER_DESCRIPTOR_IMAGE_NORMAL] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , avt->m_cascadeCount * DYNAMIC_DESCRIPTOR_SET_COUNT };
-		poolSize[VOXELIZER_DESCRIPTOR_IMAGE_OPACITY] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , avt->m_cascadeCount * DYNAMIC_DESCRIPTOR_SET_COUNT };
-		poolSize[VOXELIZER_DESCRIPTOR_IMAGE_VOXELGRID + VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 };
-		poolSize[VOXELIZER_DESCRIPTOR_BUFFER_GEOM + VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 };
-		poolSize[VOXELIZER_DESCRIPTOR_BUFFER_FRAG + VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 };
-		poolSize[VOXELIZER_DESCRIPTOR_IMAGE_ALPHAVOXELGRID + VOXELIZER_MULTIPLE_DESCRIPTOR_COUNT] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 };
-		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = VKTools::Initializers::DescriptorPoolCreateInfo(0, (avt->m_cascadeCount * DYNAMIC_DESCRIPTOR_SET_COUNT) + 1, VOXELIZER_DESCRIPTOR_COUNT, poolSize);
-		//create the descriptorPool
-		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, NULL, &renderState.m_descriptorPool));
-	}
+	VkDescriptorPoolSize poolSize[VOXELIZER_DESCRIPTOR_COUNT];
+	poolSize[VOXELIZER_DESCRIPTOR_ALBEDOOPACITY] =	{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, AXISCOUNT };
+	poolSize[VOXELIZER_DESCRIPTOR_NORMAL] =			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, AXISCOUNT };
+	poolSize[VOXELIZER_DESCRIPTOR_EMISSION] =		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, AXISCOUNT };
+	poolSize[VOXELIZER_DESCRIPTOR_UBO_GEOM] =		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, AXISCOUNT };
+	poolSize[VOXELIZER_DESCRIPTOR_UBO_FRAG] =		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, AXISCOUNT };
+	VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = VKTools::Initializers::DescriptorPoolCreateInfo(0, AXISCOUNT, VOXELIZER_DESCRIPTOR_COUNT, poolSize);
+	//create the descriptorPool
+	VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, NULL, &renderState.m_descriptorPool));
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Create the descriptor set
 	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_descriptorSets)
+	for (uint32_t i = 0; i < AXISCOUNT; i++)
 	{
-		//allocate the requirered descriptorsets
-		renderState.m_descriptorSetCount = (DYNAMIC_DESCRIPTOR_SET_COUNT * avt->m_cascadeCount) + 1;
-		renderState.m_descriptorSets = (VkDescriptorSet*)malloc(renderState.m_descriptorSetCount * sizeof(VkDescriptorSet));
-		for (uint32_t i = 0; i < avt->m_cascadeCount; i++)
-		{
-			for (uint32_t j = 0; j < DYNAMIC_DESCRIPTOR_SET_COUNT; j++)
-			{
-				VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = VKTools::Initializers::DescriptorSetAllocateInfo(renderState.m_descriptorPool, 1, &renderState.m_descriptorLayouts[0]);
-				VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, &renderState.m_descriptorSets[(i*DYNAMIC_DESCRIPTOR_SET_COUNT) + j + 1]));
-			}
-		}
-		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = VKTools::Initializers::DescriptorSetAllocateInfo(renderState.m_descriptorPool, 1, &renderState.m_descriptorLayouts[1]);
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, &renderState.m_descriptorSets[0]));
+		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = VKTools::Initializers::DescriptorSetAllocateInfo(renderState.m_descriptorPool, 1, &renderState.m_descriptorLayouts[0]);
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, &renderState.m_descriptorSets[i]));
+	}
 
-		///////////////////////////////////////////////////////
-		///// Set/Update the image and uniform buffer descriptorsets
-		/////////////////////////////////////////////////////// 
-		// Descriptorset 1 = multiple
-		// Descriptorset 0 = single
-		VkWriteDescriptorSet writeDescriptorSet = {};
-		// Update GEOM descriptorset
-		writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writeDescriptorSet.pNext = NULL;
-		writeDescriptorSet.dstSet = renderState.m_descriptorSets[0];
-		writeDescriptorSet.dstBinding = VOXELIZER_DESCRIPTOR_BUFFER_GEOM;
-		writeDescriptorSet.dstArrayElement = 0;
-		writeDescriptorSet.descriptorCount = 1;
-		writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writeDescriptorSet.pImageInfo = NULL;
-		writeDescriptorSet.pBufferInfo = &renderState.m_uniformData[0].m_descriptor;
-		writeDescriptorSet.pTexelBufferView = NULL;
-		vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, NULL);
-		// Update FRAG descriptorset
-		writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writeDescriptorSet.pNext = NULL;
-		writeDescriptorSet.dstSet = renderState.m_descriptorSets[0];
-		writeDescriptorSet.dstBinding = VOXELIZER_DESCRIPTOR_BUFFER_FRAG;
-		writeDescriptorSet.dstArrayElement = 0;
-		writeDescriptorSet.descriptorCount = 1;
-		writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writeDescriptorSet.pImageInfo = NULL;
-		writeDescriptorSet.pBufferInfo = &renderState.m_uniformData[1].m_descriptor;
-		writeDescriptorSet.pTexelBufferView = NULL;
-		vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, NULL);
-		// Update the descriptorsets for the voxel textures
-		VkWriteDescriptorSet wds = {};
-		// Bind the 3D voxel textures
-		{
-			wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			wds.pNext = NULL;
-			wds.dstSet = renderState.m_descriptorSets[0];
-			wds.dstBinding = VOXELIZER_DESCRIPTOR_IMAGE_VOXELGRID;
-			wds.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-			wds.descriptorCount = 1;
-			wds.dstArrayElement = 0;
-			wds.pImageInfo = &avt->m_descriptor[0];
-			//update the descriptorset
-			vkUpdateDescriptorSets(device, 1, &wds, 0, NULL);
-		}
-		// Bind the 3D voxel textures
-		{
-			wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			wds.pNext = NULL;
-			wds.dstSet = renderState.m_descriptorSets[0];
-			wds.dstBinding = VOXELIZER_DESCRIPTOR_IMAGE_ALPHAVOXELGRID;
-			wds.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-			wds.descriptorCount = 1;
-			wds.dstArrayElement = 0;
-			wds.pImageInfo = &avt->m_alphaDescriptor;
-			//update the descriptorset
-			vkUpdateDescriptorSets(device, 1, &wds, 0, NULL);
-		}
+	////////////////////////////////////////////////////////////////////////////////
+	// Create the Uniform Data
+	////////////////////////////////////////////////////////////////////////////////
+	VKTools::CreateBuffer(core, device,
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		sizeof(UBOGeom) * AXISCOUNT,
+		NULL,
+		&renderState.m_bufferData[0].buffer,
+		&renderState.m_bufferData[0].memory,
+		&renderState.m_bufferData[0].descriptor);
+	renderState.m_bufferData[0].descriptor.range = VK_WHOLE_SIZE;
+	VKTools::CreateBuffer(core, device,
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		sizeof(UBOFrag) * AXISCOUNT,
+		NULL,
+		&renderState.m_bufferData[1].buffer,
+		&renderState.m_bufferData[1].memory,
+		&renderState.m_bufferData[1].descriptor);
+	renderState.m_bufferData[1].descriptor.range = VK_WHOLE_SIZE;
+
+	////////////////////////////////////////////////////////////////////////////////
+	// update descriptorsets
+	////////////////////////////////////////////////////////////////////////////////
+	for (uint32_t i = 0; i < AXISCOUNT; i++)
+	{
+		VoxelizerGrid& grid = voxelizergrid[i];
+		VkWriteDescriptorSet wds[5];
+		// dynamic uniform buffers
+		wds[0] = VKTools::Initializers::WriteDescriptorSet(
+			renderState.m_descriptorSets[i],
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+			VOXELIZER_DESCRIPTOR_UBO_GEOM,
+			&renderState.m_bufferData[0].descriptor);
+		wds[1] = VKTools::Initializers::WriteDescriptorSet(
+			renderState.m_descriptorSets[i],
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+			VOXELIZER_DESCRIPTOR_UBO_FRAG,
+			&renderState.m_bufferData[1].descriptor);
+		// isotropic textures
+		wds[2] = VKTools::Initializers::WriteDescriptorSet(
+			renderState.m_descriptorSets[i],
+			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			VOXELIZER_DESCRIPTOR_ALBEDOOPACITY,
+			&grid.albedoOpacity.descriptor[0]);
+		wds[3] = VKTools::Initializers::WriteDescriptorSet(
+			renderState.m_descriptorSets[i],
+			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			VOXELIZER_DESCRIPTOR_NORMAL,
+			&grid.normal.descriptor[0]);
+		wds[4] = VKTools::Initializers::WriteDescriptorSet(
+			renderState.m_descriptorSets[i],
+			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			VOXELIZER_DESCRIPTOR_EMISSION,
+			&grid.emission.descriptor[0]);
+
+		vkUpdateDescriptorSets(device, 5, wds, 0, NULL);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////
 	// Create Pipeline
 	////////////////////////////////////////////////////////////////////////////////
-	if (!renderState.m_pipelines)
-	{
-		renderState.m_pipelineCount = 1;
-		renderState.m_pipelines = (VkPipeline*)malloc(renderState.m_pipelineCount * sizeof(VkPipeline));
+	// Create the pipeline input assembly state info
+	VkPipelineInputAssemblyStateCreateInfo pipelineInputAssemblyCreateInfo = {};
+	pipelineInputAssemblyCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	// This pipeline renders vertex data as triangles
+	pipelineInputAssemblyCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-		// Create the pipeline input assembly state info
-		VkPipelineInputAssemblyStateCreateInfo pipelineInputAssemblyCreateInfo = {};
-		pipelineInputAssemblyCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		// This pipeline renders vertex data as triangles
-		pipelineInputAssemblyCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	// Rasterization state
+	VkPipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo = {};
+	pipelineRasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	// Solid polygon mode
+	pipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+	// Enable culling TODO: might need fix
+	pipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+	// Set vert read to counter clockwise
+	pipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	pipelineRasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
+	pipelineRasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+	pipelineRasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
+	pipelineRasterizationStateCreateInfo.lineWidth = 1.0f;
 
-		// Rasterization state
-		VkPipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo = {};
-		pipelineRasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		// Solid polygon mode
-		pipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
-		// Enable culling TODO: might need fix
-		pipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
-		// Set vert read to counter clockwise
-		pipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		pipelineRasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
-		pipelineRasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
-		pipelineRasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
-		pipelineRasterizationStateCreateInfo.lineWidth = 1.0f;
+	// Color blend state
+	VkPipelineColorBlendStateCreateInfo colorBlendState = {};
+	colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlendState.attachmentCount = 0;
+	colorBlendState.pAttachments = NULL;
 
-		// Color blend state
-		VkPipelineColorBlendStateCreateInfo colorBlendState = {};
-		colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		colorBlendState.attachmentCount = 0;
-		colorBlendState.pAttachments = NULL;
+	VkPipelineViewportStateCreateInfo viewportState = {};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	//one viewport for now
+	viewportState.viewportCount = 1;
+	//scissor rectable
+	viewportState.scissorCount = 1;
 
-		VkPipelineViewportStateCreateInfo viewportState = {};
-		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		//one viewport for now
-		viewportState.viewportCount = 1;
-		//scissor rectable
-		viewportState.scissorCount = 1;
+	//enable dynamic state
+	VkPipelineDynamicStateCreateInfo dynamicState = {};
+	// The dynamic state properties themselves are stored in the command buffer
+	VkDynamicState dynamicStateEnables[2];
+	dynamicStateEnables[0] = VK_DYNAMIC_STATE_VIEWPORT;
+	dynamicStateEnables[1] = VK_DYNAMIC_STATE_SCISSOR;
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.pDynamicStates = dynamicStateEnables;
+	dynamicState.dynamicStateCount = 2;
 
-		//enable dynamic state
-		VkPipelineDynamicStateCreateInfo dynamicState = {};
-		// The dynamic state properties themselves are stored in the command buffer
-		std::vector<VkDynamicState> dynamicStateEnables;
-		dynamicStateEnables.push_back(VK_DYNAMIC_STATE_VIEWPORT);
-		dynamicStateEnables.push_back(VK_DYNAMIC_STATE_SCISSOR);
-		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dynamicState.pDynamicStates = dynamicStateEnables.data();
-		dynamicState.dynamicStateCount = (uint32_t)dynamicStateEnables.size();
+	// Depth and stencil state
+	// Describes depth and stenctil test and compare ops
+	VkPipelineDepthStencilStateCreateInfo depthStencilState = {};
+	// Basic depth compare setup with depth writes and depth test enabled
+	// No stencil used 
+	depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencilState.depthTestEnable = VK_FALSE;
+	depthStencilState.depthWriteEnable = VK_FALSE;
+	depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	depthStencilState.depthBoundsTestEnable = VK_FALSE;
+	depthStencilState.back.failOp = VK_STENCIL_OP_KEEP;
+	depthStencilState.back.passOp = VK_STENCIL_OP_KEEP;
+	depthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
+	depthStencilState.stencilTestEnable = VK_FALSE;
+	depthStencilState.front = depthStencilState.back;
 
-		// Depth and stencil state
-		// Describes depth and stenctil test and compare ops
-		VkPipelineDepthStencilStateCreateInfo depthStencilState = {};
-		// Basic depth compare setup with depth writes and depth test enabled
-		// No stencil used 
-		depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthStencilState.depthTestEnable = VK_FALSE;
-		depthStencilState.depthWriteEnable = VK_FALSE;
-		depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-		depthStencilState.depthBoundsTestEnable = VK_FALSE;
-		depthStencilState.back.failOp = VK_STENCIL_OP_KEEP;
-		depthStencilState.back.passOp = VK_STENCIL_OP_KEEP;
-		depthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
-		depthStencilState.stencilTestEnable = VK_FALSE;
-		depthStencilState.front = depthStencilState.back;
+	// Multi sampling state
+	VkPipelineMultisampleStateCreateInfo multisampleState = {};
+	multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampleState.pSampleMask = NULL;
+	// No multi sampling used in this example
+	multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-		// Multi sampling state
-		VkPipelineMultisampleStateCreateInfo multisampleState = {};
-		multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisampleState.pSampleMask = NULL;
-		// No multi sampling used in this example
-		multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		// Load shaders
-		// Shaders are loaded from the SPIR-V format, which can be generated from glsl
+	// Load shaders
 #define	SHADERNUM 3
-		Shader shaderStages[SHADERNUM];
-		shaderStages[0] = VKTools::LoadShader("shaders/voxelizer.vert.spv", "main", device, VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = VKTools::LoadShader("shaders/voxelizer.geom.spv", "main", device, VK_SHADER_STAGE_GEOMETRY_BIT);
-		shaderStages[2] = VKTools::LoadShader("shaders/voxelizer.frag.spv", "main", device, VK_SHADER_STAGE_FRAGMENT_BIT);
+	Shader shaderStages[SHADERNUM];
+	shaderStages[0] = VKTools::LoadShader("shaders/voxelizer.vert.spv", "main", device, VK_SHADER_STAGE_VERTEX_BIT);
+	shaderStages[1] = VKTools::LoadShader("shaders/voxelizer.geom.spv", "main", device, VK_SHADER_STAGE_GEOMETRY_BIT);
+	shaderStages[2] = VKTools::LoadShader("shaders/voxelizer.frag.spv", "main", device, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-		// Assign states
-		// Assign pipeline state create information
-		std::vector<VkPipelineShaderStageCreateInfo> shaderStagesData;
-		for (int i = 0; i < SHADERNUM; i++)
-			shaderStagesData.push_back(shaderStages[i].m_shaderStage);
+	// Assign states
+	// Assign pipeline state create information
+	VkPipelineShaderStageCreateInfo shaderStagesData[SHADERNUM];
+	for (int i = 0; i < SHADERNUM; i++)	
+		shaderStagesData[i] = shaderStages[i].m_shaderStage;
+
+	// pipelineinfo for creating the pipeline
+	VkGraphicsPipelineCreateInfo pipelineCreateInfo[2] = {};
+	pipelineCreateInfo[0].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineCreateInfo[0].layout = renderState.m_pipelineLayout;
+	pipelineCreateInfo[0].stageCount = SHADERNUM;
+	pipelineCreateInfo[0].pStages = shaderStagesData;
+	pipelineCreateInfo[0].pVertexInputState = &scenes[0].vertices.inputState;
+	pipelineCreateInfo[0].pInputAssemblyState = &pipelineInputAssemblyCreateInfo;
+	pipelineCreateInfo[0].pRasterizationState = &pipelineRasterizationStateCreateInfo;
+	pipelineCreateInfo[0].pColorBlendState = &colorBlendState;
+	pipelineCreateInfo[0].pMultisampleState = &multisampleState;
+	pipelineCreateInfo[0].pViewportState = &viewportState;
+	pipelineCreateInfo[0].pDepthStencilState = &depthStencilState;
+	pipelineCreateInfo[0].renderPass = renderState.m_renderpass;
+	pipelineCreateInfo[0].pDynamicState = &dynamicState;
+	pipelineCreateInfo[0].subpass = 0;
+
 #undef SHADERNUM
 
-		// pipelineinfo for creating the pipeline
-		VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
-		pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pipelineCreateInfo.layout = renderState.m_pipelineLayout;
-		pipelineCreateInfo.stageCount = (uint32_t)shaderStagesData.size();
-		pipelineCreateInfo.pStages = shaderStagesData.data();
-		pipelineCreateInfo.pVertexInputState = &vertices->inputState;
-		pipelineCreateInfo.pInputAssemblyState = &pipelineInputAssemblyCreateInfo;
-		pipelineCreateInfo.pRasterizationState = &pipelineRasterizationStateCreateInfo;
-		pipelineCreateInfo.pColorBlendState = &colorBlendState;
-		pipelineCreateInfo.pMultisampleState = &multisampleState;
-		pipelineCreateInfo.pViewportState = &viewportState;
-		pipelineCreateInfo.pDepthStencilState = &depthStencilState;
-		pipelineCreateInfo.renderPass = renderState.m_renderpass;
-		pipelineCreateInfo.pDynamicState = &dynamicState;
-
-		VkPhysicalDeviceProperties deviceProps;
-		vkGetPhysicalDeviceProperties(core->GetPhysicalGPU(), &deviceProps);
-		//assert(sizeof(pushConstants) <= deviceProps.limits.maxPushConstantsSize);
-
-		// Create rendering pipeline
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, renderState.m_pipelineCache, 1, &pipelineCreateInfo, NULL, &renderState.m_pipelines[0]));
-	}
+	// Create rendering pipeline
+	VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, renderState.m_pipelineCache, 1, pipelineCreateInfo, NULL, renderState.m_pipelines));
 
 	////////////////////////////////////////////////////////////////////////////////
-	// Build command buffers
+	// Rebuild the command buffers
 	////////////////////////////////////////////////////////////////////////////////
-	Parameter* parameter;
-	parameter = (Parameter*)malloc(sizeof(Parameter));
-	parameter->avt = avt;
-	parameter->meshCount = meshCount;
-	parameter->meshes = meshes;
-	parameter->staticDescriptorSet = staticDescriptorSet;
-	renderState.m_cmdBufferParameters = (BYTE*)parameter;
+	renderState.m_commandBufferCount = AXISCOUNT;
+	renderState.m_commandBuffers = (VkCommandBuffer*)malloc(sizeof(VkCommandBuffer)*renderState.m_commandBufferCount);
+	for (uint32_t i = 0; i < renderState.m_commandBufferCount; i++)
+		renderState.m_commandBuffers[i] = VKTools::Initializers::CreateCommandBuffer(core->GetGraphicsCommandPool(), device, VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
 
-	renderState.m_CreateCommandBufferFunc = &BuildCommandBufferVoxelizerState;
-	renderState.m_CreateCommandBufferFunc(&renderState, commandPool, core, renderState.m_framebufferCount, renderState.m_framebuffers, renderState.m_cmdBufferParameters);
 }

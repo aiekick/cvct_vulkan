@@ -40,7 +40,7 @@ void VulkanCore::Prepare()
 	CreatePipelineCache();
 	CreateFrameBuffer();
 	// Flush the setup
-	VKTools::FlushCommandBuffer(m_setupCommandBuffer, m_deviceQueues.graphics, m_viewDevice, m_devicePools.graphics, false);
+	VKTools::FlushCommandBuffer(m_setupCommandBuffer, m_deviceQueues.graphics, m_viewDevice, m_devicePools.graphics, true);
 }
 
 uint32_t VulkanCore::GetQueueFamiliyIndex(VkQueueFlagBits flag)

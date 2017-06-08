@@ -2,17 +2,18 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image/stb_image.h>
+#include "MemoryAllocator.h"
 
 uint32_t ConvertAsset_Image
 (
-	asset_s* outAsset,
+	Asset* outAsset,
 	const void* data,
 	uint64_t dataSizeInBytes,
 	const char* basePath,
 	uint32_t basePathLength,
 	Memory_Linear_Allocator* allocator,
-	uint32_t allocatorIdx
-)
+	uint32_t allocatorIdx,
+	AssetManager& assetmanager)
 {
 	//TODO LOAD MIPMAPS
 	int width = 0, height = 0, comp = 0;
@@ -29,23 +30,23 @@ uint32_t ConvertAsset_Image
 
 	uint32_t totalPixelCount = width * height;
 	uint32_t mips = 1;
-	uint32_t totalByteSize = sizeof(image_desc_s) + totalPixelCount * sizeof(uint32_t) + mips * sizeof(mip_desc_s);
+	uint32_t totalByteSize = sizeof(ImageDesc) + totalPixelCount * sizeof(uint32_t) + mips * sizeof(MipDesc);
 	uint8_t* assetData = (uint8_t*)AllocateVirtualMemory(ALLOCATOR_IDX_ASSET_DATA, allocator, totalByteSize);
 
 	//assign the first image description(main image)
-	image_desc_s* imgDesc = (image_desc_s*)assetData;
-	mip_desc_s* mip = (mip_desc_s*)(assetData + sizeof(image_desc_s));
-	image_desc_s image;
+	ImageDesc* imgDesc = (ImageDesc*)assetData;
+	MipDesc* mip = (MipDesc*)(assetData + sizeof(ImageDesc));
+	ImageDesc image;
 	image.height = height;
 	image.width = width;
 	image.mipCount = mips;
 	image.mips = mip;
 	*imgDesc = image;
 
-	uint32_t* outPixels = (uint32_t*)(assetData + sizeof(image_desc_s) + mips * sizeof(mip_desc_s));
+	uint32_t* outPixels = (uint32_t*)(assetData + sizeof(ImageDesc) + mips * sizeof(MipDesc));
 	uint32_t* mipPixels = outPixels;
 	
-	mip_desc_s mip0;
+	MipDesc mip0;
 	mip0.width = width;
 	mip0.height = height;
 	mip0.offset = 0;
@@ -65,7 +66,7 @@ uint32_t ConvertAsset_Image
 	}
 
 	outAsset->type = 'IMG';
-	outAsset->size = sizeof(image_desc_s) + mips * sizeof(mip_desc_s) + totalPixelCount * 4;
+	outAsset->size = sizeof(ImageDesc) + mips * sizeof(MipDesc) + totalPixelCount * 4;
 	outAsset->data = assetData;
 
 	stbi_image_free(pixels);

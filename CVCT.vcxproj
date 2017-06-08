@@ -114,7 +114,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)/Lib/;external/glfw-3.2.1/lib/</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)/Bin/;external/glfw-3.2.1/lib/</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -154,7 +154,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)/Lib/;external/glfw-3.2.1/lib/</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)/Bin/;external/glfw-3.2.1/lib/</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -179,10 +179,12 @@
     <ClInclude Include="source\DataTypes.h" />
     <ClInclude Include="source\Defines.h" />
     <ClInclude Include="source\imgui_impl_glfw_vulkan.h" />
+    <ClInclude Include="source\MemoryAllocator.h" />
     <ClInclude Include="source\PipelineStates.h" />
     <ClInclude Include="source\ImageLoader.h" />
     <ClInclude Include="source\io.h" />
     <ClInclude Include="source\OpenGEX.h" />
+    <ClInclude Include="source\SceneTools.h" />
     <ClInclude Include="source\Shader.h" />
     <ClInclude Include="source\SwapChain.h" />
     <ClInclude Include="source\VCTPipelineDefines.h" />
@@ -202,21 +204,18 @@
     <ClCompile Include="source\AnisotropicVoxelTexture.cpp" />
     <ClCompile Include="source\AssetManager.cpp" />
     <ClCompile Include="source\Camera.cpp" />
-    <ClCompile Include="source\ConeTraceState.cpp" />
-    <ClCompile Include="source\DeferredMainRenderState.cpp" />
+    <ClCompile Include="source\DebugBoxState.cpp" />
     <ClCompile Include="source\ForwardRenderState.cpp" />
     <ClCompile Include="source\ImageLoader.cpp" />
-    <ClCompile Include="source\ImguiState.cpp" />
     <ClCompile Include="source\imgui_impl_glfw_vulkan.cpp" />
-    <ClCompile Include="source\ForwardMainRenderState.cpp" />
     <ClCompile Include="source\MipMapperState.cpp" />
     <ClCompile Include="source\OpenGEX.cpp" />
     <ClCompile Include="source\PipelineStates.cpp" />
     <ClCompile Include="source\PostVoxelizerState.cpp" />
+    <ClCompile Include="source\SceneTools.cpp" />
     <ClCompile Include="source\Shader.cpp" />
-    <ClCompile Include="source\ShadowMapState.cpp" />
     <ClCompile Include="source\SwapChain.cpp" />
-    <ClCompile Include="source\VoxelizerDebugState.cpp" />
+    <ClCompile Include="source\VoxelGridCullingState.cpp" />
     <ClCompile Include="source\VoxelizerState.cpp" />
     <ClCompile Include="source\VKTools.cpp" />
     <ClCompile Include="source\VulkanCore.cpp" />
@@ -224,12 +223,16 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="bin\shaders\conetrace.comp" />
+    <None Include="bin\shaders\debugboxrenderer.frag" />
+    <None Include="bin\shaders\debugboxrenderer.geom" />
+    <None Include="bin\shaders\debugboxrenderer.vert" />
     <None Include="bin\shaders\deferredmaincomposition.vert" />
     <None Include="bin\shaders\deferredmainnonscaledcomposition.frag" />
     <None Include="bin\shaders\deferredmainscaledcomposition.frag" />
     <None Include="bin\shaders\diffuse.frag" />
     <None Include="bin\shaders\diffuse.vert" />
     <None Include="bin\shaders\deferredmainscaledgbuffer.frag" />
+    <None Include="bin\shaders\gridculling.comp" />
     <None Include="bin\shaders\mainrenderer.frag" />
     <None Include="bin\shaders\texturemipmapper.comp" />
     <None Include="bin\shaders\voxelizer.frag" />
@@ -238,7 +241,7 @@
     <None Include="bin\shaders\voxelizerdebug.frag" />
     <None Include="bin\shaders\voxelizerdebug.geom" />
     <None Include="bin\shaders\voxelizerdebug.vert" />
-    <None Include="bin\shaders\voxelizerpost.comp" />
+    <None Include="bin\shaders\postvoxelizer.comp" />
     <None Include="bin\shaders\voxelmipmapper.comp" />
     <None Include="external\imgui\LICENSE" />
     <None Include="external\imgui\README.md" />
